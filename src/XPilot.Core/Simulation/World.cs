@@ -1,0 +1,335 @@
+using System.Numerics;
+using XPilot.Core.Maps;
+using XPilot.Core.Rules;
+
+namespace XPilot.Core.Simulation;
+
+/// <summary>
+/// The authoritative game state. Advance it with <see cref="Step"/> at a fixed rate of
+/// <see cref="GameConfig.TickRate"/>; it has no dependency on rendering or input devices.
+/// </summary>
+public sealed class World(Map map, GameConfig config, IGameRules rules, int seed = 0)
+{
+    private readonly List<GameEvent> _events = [];
+
+    public Map Map { get; } = map;
+    public GameConfig Config { get; } = config;
+    public IGameRules Rules { get; } = rules;
+    public Random Rng { get; } = new(seed);
+    public List<Ship> Ships { get; } = [];
+    public List<Bullet> Bullets { get; } = [];
+    /// <summary>Events produced by the last <see cref="Start"/> or <see cref="Step"/> call.</summary>
+    public IReadOnlyList<GameEvent> Events => _events;
+    public float Time { get; private set; }
+    public int Tick { get; private set; }
+
+    public Ship AddShip(string name, bool isBot)
+    {
+        var ship = new Ship(Ships.Count, name, isBot, Ships.Count);
+        Ships.Add(ship);
+        return ship;
+    }
+
+    public Ship? GetShip(int id) => id >= 0 && id < Ships.Count ? Ships[id] : null;
+
+    public void Emit(GameEvent e) => _events.Add(e);
+
+    public void Start()
+    {
+        _events.Clear();
+        Rules.Initialize(this);
+    }
+
+    /// <param name="inputs">One input per ship, indexed by ship id. Missing entries mean "no input".</param>
+    public void Step(ReadOnlySpan<ShipInput> inputs)
+    {
+        _events.Clear();
+        const float dt = GameConfig.Dt;
+
+        foreach (var s in Ships)
+        {
+            s.PrevPosition = s.Position;
+            s.PrevHeading = s.Heading;
+        }
+        foreach (var b in Bullets) b.PrevPosition = b.Position;
+
+        bool locked = Rules.ControlsLocked;
+        for (int i = 0; i < Ships.Count; i++)
+        {
+            UpdateShip(Ships[i], i < inputs.Length ? inputs[i] : default, dt, locked);
+        }
+
+        ResolveShipCollisions();
+        UpdateBullets(dt);
+
+        Time += dt;
+        Tick++;
+        Rules.Update(this);
+    }
+
+    public Vector2 GravityAt(Vector2 p)
+    {
+        var g = Map.Gravity;
+        foreach (var src in Map.GravitySources)
+        {
+            var d = Map.Delta(p, src.Position);
+            float dist = d.Length();
+            if (dist < 1f || dist > Config.AttractorRange) continue;
+            float mag = MathF.Min(Map.AttractorStrength / (dist * dist), Config.AttractorMaxAccel);
+            g += d / dist * (mag * src.Sign);
+        }
+        return g;
+    }
+
+    public void SpawnShip(Ship s, Vector2 position, float heading)
+    {
+        s.Position = s.PrevPosition = position;
+        s.Velocity = Vector2.Zero;
+        s.Heading = s.PrevHeading = heading;
+        s.Alive = true;
+        s.Fuel = Config.MaxFuel;
+        s.Shield = false;
+        s.Thrusting = false;
+        s.Refueling = false;
+        s.SpawnProtection = Config.SpawnProtection;
+        s.FireCooldown = 0.3f;
+        s.RespawnTimer = 0f;
+        Emit(new GameEvent(GameEventType.ShipSpawned, s.Id, Position: position));
+    }
+
+    /// <summary>Picks a heading with open space ahead, preferring <paramref name="preferredDirection"/>.</summary>
+    public float ChooseSpawnHeading(Vector2 position, Vector2? preferredDirection = null)
+    {
+        var pref = preferredDirection is { } p ? MathUtil.SafeNormalize(p) : Vector2.Zero;
+        float bestScore = float.MinValue, bestAngle = -MathF.PI / 2f;
+        for (int k = 0; k < 16; k++)
+        {
+            float angle = k * MathUtil.TwoPi / 16f;
+            var dir = MathUtil.FromAngle(angle);
+            float clear = Map.ClearDistance(position, dir, 192f, Config.ShipRadius);
+            float score = MathF.Min(clear, 128f) + Vector2.Dot(dir, pref) * 150f + (preferredDirection == null ? -dir.Y * 10f : 0f);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestAngle = angle;
+            }
+        }
+        return MathUtil.WrapAngle(bestAngle);
+    }
+
+    public void Kill(Ship victim, Ship? killer, DeathCause cause)
+    {
+        if (!victim.Alive) return;
+        victim.Alive = false;
+        victim.Deaths++;
+        victim.Shield = false;
+        victim.Thrusting = false;
+        victim.Refueling = false;
+        victim.RespawnTimer = Rules.RespawnDelay;
+        Emit(new GameEvent(GameEventType.ShipDestroyed, victim.Id, killer?.Id ?? -1, victim.Position, victim.Velocity, Cause: cause));
+        Rules.OnShipDestroyed(this, victim, killer, cause);
+    }
+
+    private void UpdateShip(Ship s, ShipInput input, float dt, bool locked)
+    {
+        var cfg = Config;
+        if (!s.Alive)
+        {
+            if (s.RespawnTimer > 0f) s.RespawnTimer -= dt;
+            if (s.RespawnTimer <= 0f && !Rules.IsOver) Rules.Respawn(this, s);
+            return;
+        }
+
+        float turn = Math.Clamp(input.Turn, -1f, 1f);
+        s.Heading = MathUtil.WrapAngle(s.Heading + turn * cfg.TurnSpeed * dt);
+        if (locked)
+        {
+            s.Thrusting = false;
+            s.Shield = false;
+            return;
+        }
+
+        s.SpawnProtection = MathF.Max(0f, s.SpawnProtection - dt);
+        s.FireCooldown = MathF.Max(0f, s.FireCooldown - dt);
+
+        s.Shield = input.Shield && s.Fuel > 0f;
+        if (s.Shield) s.Fuel -= cfg.ShieldFuelPerSec * dt;
+
+        s.Thrusting = input.Thrust && s.Fuel > 0f;
+        var accel = GravityAt(s.Position);
+        if (s.Thrusting)
+        {
+            accel += MathUtil.FromAngle(s.Heading) * cfg.ThrustAccel;
+            s.Fuel -= cfg.ThrustFuelPerSec * dt;
+        }
+
+        s.Velocity = MathUtil.ClampLength(s.Velocity + accel * dt, cfg.MaxSpeed);
+        s.Position = Map.WrapPosition(s.Position + s.Velocity * dt);
+
+        ResolveWallCollisions(s);
+        if (!s.Alive) return;
+
+        s.Refueling = false;
+        foreach (var station in Map.FuelStations)
+        {
+            if (Map.Distance(s.Position, station) < cfg.RefuelRange)
+            {
+                s.Refueling = true;
+                break;
+            }
+        }
+        s.Fuel = Math.Clamp(s.Fuel + (s.Refueling ? cfg.RefuelPerSec : cfg.PassiveRefuelPerSec) * dt, 0f, cfg.MaxFuel);
+
+        if (input.Fire && !s.Shield && Rules.WeaponsEnabled && s.FireCooldown <= 0f && s.Fuel >= cfg.FireFuel)
+        {
+            FireBullet(s);
+        }
+    }
+
+    private void FireBullet(Ship s)
+    {
+        var cfg = Config;
+        var dir = MathUtil.FromAngle(s.Heading);
+        var position = Map.WrapPosition(s.Position + dir * (cfg.ShipRadius + 3f));
+        s.FireCooldown = cfg.FireCooldown;
+        s.Fuel -= cfg.FireFuel;
+        s.SpawnProtection = 0f;
+        Emit(new GameEvent(GameEventType.ShipFired, s.Id, Position: position));
+
+        if (Map.PointInWall(position))
+        {
+            Emit(new GameEvent(GameEventType.BulletHitWall, s.Id, Position: position));
+            return;
+        }
+        Bullets.Add(new Bullet
+        {
+            Position = position,
+            PrevPosition = position,
+            Velocity = s.Velocity + dir * cfg.BulletSpeed,
+            OwnerId = s.Id,
+        });
+    }
+
+    private void ResolveWallCollisions(Ship s)
+    {
+        var cfg = Config;
+        for (int iteration = 0; iteration < 4; iteration++)
+        {
+            if (!Map.FindDeepestContact(s.Position, cfg.ShipRadius, out var n, out float depth)) break;
+            s.Position = Map.WrapPosition(s.Position + n * (depth + 0.01f));
+
+            float vn = Vector2.Dot(s.Velocity, n);
+            if (vn >= 0f) continue;
+            float impact = -vn;
+            if (impact > cfg.CrashSpeed)
+            {
+                if (!s.IsProtected)
+                {
+                    Kill(s, null, DeathCause.Wall);
+                    return;
+                }
+                if (s.Shield) s.Fuel = MathF.Max(0f, s.Fuel - impact * cfg.ShieldImpactFuel);
+            }
+
+            var tangential = s.Velocity - n * vn;
+            s.Velocity = tangential * cfg.WallFriction - n * (vn * cfg.WallRestitution);
+            if (impact > 40f)
+            {
+                Emit(new GameEvent(GameEventType.WallBounce, s.Id, Position: s.Position - n * cfg.ShipRadius, Value: impact));
+            }
+        }
+    }
+
+    private void ResolveShipCollisions()
+    {
+        var cfg = Config;
+        float minDist = cfg.ShipRadius * 2f;
+        for (int i = 0; i < Ships.Count; i++)
+        {
+            var a = Ships[i];
+            if (!a.Alive) continue;
+            for (int j = i + 1; j < Ships.Count; j++)
+            {
+                var b = Ships[j];
+                if (!b.Alive) continue;
+                var d = Map.Delta(a.Position, b.Position);
+                float dist2 = d.LengthSquared();
+                if (dist2 >= minDist * minDist) continue;
+
+                float dist = MathF.Sqrt(dist2);
+                var n = dist > 1e-4f ? d / dist : Vector2.UnitX;
+                float overlap = minDist - dist;
+                a.Position = Map.WrapPosition(a.Position - n * (overlap / 2f));
+                b.Position = Map.WrapPosition(b.Position + n * (overlap / 2f));
+
+                float relVn = Vector2.Dot(b.Velocity - a.Velocity, n);
+                if (relVn >= 0f) continue;
+
+                if (cfg.ShipCollisionsKill && -relVn > cfg.CrashSpeed)
+                {
+                    bool aDies = !a.IsProtected, bDies = !b.IsProtected;
+                    if (aDies) Kill(a, bDies ? null : b, DeathCause.Collision);
+                    if (bDies) Kill(b, aDies ? null : a, DeathCause.Collision);
+                    if (aDies || bDies) continue;
+                }
+
+                // Equal masses, partially elastic.
+                float impulse = -(1f + cfg.WallRestitution) * relVn / 2f;
+                a.Velocity -= n * impulse;
+                b.Velocity += n * impulse;
+            }
+        }
+    }
+
+    private void UpdateBullets(float dt)
+    {
+        const int substeps = 2;
+        float subDt = dt / substeps;
+        foreach (var b in Bullets)
+        {
+            if (b.Dead) continue;
+            b.Age += dt;
+            if (b.Age > Config.BulletLife)
+            {
+                b.Dead = true;
+                continue;
+            }
+            for (int k = 0; k < substeps && !b.Dead; k++)
+            {
+                b.Position = Map.WrapPosition(b.Position + b.Velocity * subDt);
+                if (Map.PointInWall(b.Position))
+                {
+                    b.Dead = true;
+                    Emit(new GameEvent(GameEventType.BulletHitWall, b.OwnerId, Position: b.Position));
+                    break;
+                }
+                CheckBulletHit(b);
+            }
+        }
+        Bullets.RemoveAll(b => b.Dead);
+    }
+
+    private void CheckBulletHit(Bullet b)
+    {
+        var cfg = Config;
+        float hitRadius = cfg.ShipRadius + cfg.BulletRadius;
+        foreach (var s in Ships)
+        {
+            if (!s.Alive) continue;
+            if (s.Id == b.OwnerId && b.Age < cfg.SelfHitGrace) continue;
+            if (Map.Delta(s.Position, b.Position).LengthSquared() >= hitRadius * hitRadius) continue;
+
+            b.Dead = true;
+            if (s.IsProtected)
+            {
+                s.Velocity += (b.Velocity - s.Velocity) * 0.03f;
+                Emit(new GameEvent(GameEventType.ShieldHit, s.Id, b.OwnerId, b.Position));
+            }
+            else
+            {
+                Kill(s, GetShip(b.OwnerId), DeathCause.Bullet);
+            }
+            return;
+        }
+    }
+}

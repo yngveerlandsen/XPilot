@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/XPilot.Core/XPilot.Core.csproj" />
+    <Project Path="src/XPilot.Desktop/XPilot.Desktop.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/XPilot.Core.Tests/XPilot.Core.Tests.csproj" />
+  </Folder>
+</Solution>
