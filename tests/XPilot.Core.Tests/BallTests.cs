@@ -207,6 +207,25 @@ public class BallTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void RemovedShip_TakesItsBullets_SoTheyCantHitItsTeammates()
+    {
+        var world = new World(TestUtil.LoadMap("bastions"), new GameConfig(), new BallRules(), seed: 1);
+        var a = world.AddShip("A", false);
+        var b = world.AddShip("B", false);
+        a.Team = b.Team = Teams.Red;
+        world.Start();
+        TestUtil.Place(a, new Vector2(200, 200), Vector2.Zero, heading: 0f);
+        TestUtil.Place(b, new Vector2(320, 200), Vector2.Zero);
+        world.Step([new ShipInput { Fire = true }]);
+        Assert.Single(world.Bullets);
+
+        world.RemoveShip(a);
+        Assert.Empty(world.Bullets);
+        TestUtil.Run(world, 40);
+        Assert.True(b.Alive);
+    }
+
+    [Fact]
     public void Match_SplitsBotsIntoTeams_PlayerOnRed()
     {
         var match = new Match(new MatchSetup { Map = TestUtil.LoadMap("bastions"), BotCount = 5, Seed = 1 });

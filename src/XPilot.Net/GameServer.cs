@@ -72,6 +72,9 @@ public sealed class GameServer
     /// <summary>Server log lines: joins, leaves, chat and match changes.</summary>
     public event Action<string>? Log;
 
+    /// <summary>Inputs waiting to be applied for a connection, for tests.</summary>
+    internal int PendingInputs(int connectionId) => _clients.TryGetValue(connectionId, out var c) ? c.Pending.Count : 0;
+
     public ServerInfo Info => new(_options.Name, Match.World.Map.Name, Match.World.Map.Mode.ToString(),
         Match.Humans.Count, Match.Capacity, _options.Port);
 
@@ -103,7 +106,7 @@ public sealed class GameServer
             var reader = MessageReader.Open(data, out var type);
             switch (type)
             {
-                case MessageType.Input:
+                case MessageType.Input when client.Ship != null:
                     QueueInputs(client, reader);
                     break;
                 case MessageType.Chat:
@@ -118,7 +121,7 @@ public sealed class GameServer
                     break;
             }
         }
-        catch (EndOfStreamException)
+        catch (Exception ex) when (MessageReader.IsMalformed(ex))
         {
             // A malformed packet: ignore it rather than let one client take the server down.
         }

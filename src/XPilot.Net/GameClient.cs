@@ -98,7 +98,7 @@ public sealed class GameClient : IMatchView
                     break;
             }
         }
-        catch (EndOfStreamException)
+        catch (Exception ex) when (MessageReader.IsMalformed(ex))
         {
         }
     }

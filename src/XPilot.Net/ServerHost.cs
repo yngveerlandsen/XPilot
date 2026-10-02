@@ -20,14 +20,7 @@ public sealed class ServerHost : IDisposable
         public int Id => peer.Id;
         public int RoundTripMs => peer.RoundTripTime;
 
-        public void Send(byte[] data, Delivery delivery)
-        {
-            // Unreliable packets can't be split; anything too big for one goes reliably instead.
-            var method = delivery == Delivery.Reliable || data.Length > peer.GetMaxSinglePacketSize(DeliveryMethod.Unreliable)
-                ? DeliveryMethod.ReliableOrdered
-                : DeliveryMethod.Unreliable;
-            peer.Send(data, method);
-        }
+        public void Send(byte[] data, Delivery delivery) => peer.SendMessage(data, delivery);
     }
 
     private readonly GameServer _server;
@@ -195,6 +188,21 @@ public sealed class ServerHost : IDisposable
         _stopping = true;
         if (_thread != null && Thread.CurrentThread != _thread) _thread.Join(2000);
         if (_thread == null) _net.Stop();
+    }
+}
+
+internal static class PeerExtensions
+{
+    /// <summary>
+    /// Sends on the single reliable ordered channel, or unreliably. Unreliable packets can't be split, so
+    /// anything too big for one packet goes reliably instead.
+    /// </summary>
+    public static void SendMessage(this NetPeer peer, byte[] data, Delivery delivery)
+    {
+        var method = delivery == Delivery.Reliable || data.Length > peer.GetMaxSinglePacketSize(DeliveryMethod.Unreliable)
+            ? DeliveryMethod.ReliableOrdered
+            : DeliveryMethod.Unreliable;
+        peer.Send(data, method);
     }
 }
 

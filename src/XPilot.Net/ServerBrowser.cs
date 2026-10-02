@@ -82,7 +82,8 @@ public sealed class ServerBrowser : IDisposable
             }
             else if (type == MessageType.MasterListResponse)
             {
-                int count = reader.ReadByte();
+                // Id, address and the smallest server info.
+                int count = MessageReader.CheckCount(reader, reader.ReadByte(), 14);
                 for (int i = 0; i < count; i++)
                 {
                     var id = reader.ReadString();
@@ -95,7 +96,7 @@ public sealed class ServerBrowser : IDisposable
                 }
             }
         }
-        catch (EndOfStreamException)
+        catch (Exception ex) when (MessageReader.IsMalformed(ex))
         {
         }
     }

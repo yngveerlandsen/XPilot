@@ -120,10 +120,7 @@ public sealed class ClientConnection : IDisposable
     private void Send(byte[] data, Delivery delivery)
     {
         if (_peer == null || Status != ConnectionStatus.Connected) return;
-        var method = delivery == Delivery.Reliable || data.Length > _peer.GetMaxSinglePacketSize(DeliveryMethod.Unreliable)
-            ? DeliveryMethod.ReliableOrdered
-            : DeliveryMethod.Unreliable;
-        _peer.Send(data, method);
+        _peer.SendMessage(data, delivery);
     }
 
     private void Fail(string error)

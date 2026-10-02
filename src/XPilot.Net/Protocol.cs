@@ -106,6 +106,28 @@ public sealed class MessageWriter
 
 public static class MessageReader
 {
+    /// <summary>
+    /// Checks that a count read from a message fits in what is left of it, given the smallest size of one
+    /// item, so a corrupt or hostile count can't make the reader allocate a huge list.
+    /// </summary>
+    public static int CheckCount(BinaryReader r, int count, int minItemBytes)
+    {
+        long remaining = r.BaseStream.Length - r.BaseStream.Position;
+        if (count < 0 || (long)count * minItemBytes > remaining)
+        {
+            throw new InvalidDataException($"Message claims {count} items with only {remaining} bytes left");
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Exceptions that mean a message was truncated, corrupt or hostile. Receivers drop such messages instead
+    /// of letting one bad packet take down a client or server.
+    /// </summary>
+    public static bool IsMalformed(Exception ex) =>
+        ex is IOException or InvalidDataException or ArgumentException or FormatException or OverflowException
+            or System.Text.Json.JsonException or XPilot.Core.Maps.MapFormatException;
+
     /// <summary>Reads the message type and returns a reader positioned at the fields.</summary>
     public static BinaryReader Open(byte[] data, out MessageType type)
     {

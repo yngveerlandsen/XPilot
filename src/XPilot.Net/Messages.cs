@@ -77,10 +77,13 @@ public static class RosterMessage
         return m.ToArray();
     }
 
+    /// <summary>Id, an empty name, bot flag and team.</summary>
+    private const int MinBytes = 7;
+
     public static (int MatchId, List<RosterEntry> Entries) Decode(BinaryReader r)
     {
         int matchId = r.ReadInt32();
-        int count = r.ReadInt16();
+        int count = MessageReader.CheckCount(r, r.ReadInt16(), MinBytes);
         var list = new List<RosterEntry>(count);
         for (int i = 0; i < count; i++) list.Add(new RosterEntry(r.ReadInt32(), r.ReadString(), r.ReadBoolean(), r.ReadSByte()));
         return (matchId, list);
@@ -90,6 +93,8 @@ public static class RosterMessage
 /// <summary>Everything about a ship that changes during play.</summary>
 public struct ShipState
 {
+    public const int Size = 60;
+
     [Flags]
     private enum Flags : byte
     {
@@ -188,6 +193,8 @@ public struct ShipState
 
 public struct BallSnapshot
 {
+    public const int Size = 26;
+
     public int Team;
     public BallState State;
     public int CarrierId;
@@ -277,10 +284,10 @@ public sealed class Snapshot
             AckSeq = r.ReadInt32(),
             Intermission = r.ReadSingle(),
         };
-        snap.RulesState = r.ReadBytes(r.ReadInt16());
-        int ships = r.ReadByte();
+        snap.RulesState = r.ReadBytes(MessageReader.CheckCount(r, r.ReadInt16(), 1));
+        int ships = MessageReader.CheckCount(r, r.ReadByte(), ShipState.Size);
         for (int i = 0; i < ships; i++) snap.Ships.Add(ShipState.Read(r));
-        int balls = r.ReadByte();
+        int balls = MessageReader.CheckCount(r, r.ReadByte(), BallSnapshot.Size);
         for (int i = 0; i < balls; i++) snap.Balls.Add(BallSnapshot.Read(r));
         return snap;
     }
@@ -295,6 +302,9 @@ public enum NetEventKind : byte { Game, BulletSpawned, BulletRemoved }
 /// </summary>
 public struct NetEvent
 {
+    /// <summary>The smallest event on the wire: tick, kind and a bullet id.</summary>
+    public const int MinSize = 9;
+
     public int Tick;
     public NetEventKind Kind;
     public GameEvent Game;
@@ -372,7 +382,7 @@ public static class EventsMessage
     public static (int MatchId, List<NetEvent> Events) Decode(BinaryReader r)
     {
         int matchId = r.ReadInt32();
-        int count = r.ReadInt32();
+        int count = MessageReader.CheckCount(r, r.ReadInt32(), NetEvent.MinSize);
         var list = new List<NetEvent>(count);
         for (int i = 0; i < count; i++) list.Add(NetEvent.Read(r));
         return (matchId, list);
@@ -408,7 +418,7 @@ public static class InputMessage
     public static (int FirstSeq, List<ShipInput> Inputs) Decode(BinaryReader r)
     {
         int newest = r.ReadInt32();
-        int count = r.ReadByte();
+        int count = MessageReader.CheckCount(r, r.ReadByte(), 2);
         var list = new List<ShipInput>(count);
         for (int i = 0; i < count; i++)
         {

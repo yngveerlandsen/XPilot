@@ -107,12 +107,13 @@ public sealed class XPilotGame : Game
         });
     }
 
-    /// <summary>Applies the fullscreen, VSync and antialiasing settings.</summary>
+    /// <summary>Applies the fullscreen, VSync and antialiasing settings, keeping the window's size unless fullscreen changes.</summary>
     public void ApplyVideoSettings()
     {
         _graphics.SynchronizeWithVerticalRetrace = Settings.VSync;
         _graphics.PreferMultiSampling = Settings.Antialiasing;
-        SetFullscreen(Settings.Fullscreen);
+        if (_graphics.IsFullScreen != Settings.Fullscreen) SetFullscreen(Settings.Fullscreen);
+        else _graphics.ApplyChanges();
     }
 
     /// <summary>Switches screens at the start of the next update.</summary>

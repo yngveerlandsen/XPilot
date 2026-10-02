@@ -148,7 +148,7 @@ public sealed class JoinScreen(XPilotGame game) : Screen(game)
 
         string master = _browser.HasMaster
             ? $"INTERNET LIST FROM {Game.Settings.MasterServer!.ToUpperInvariant()}"
-            : "LAN ONLY - SET MASTERSERVER IN SETTINGS.JSON FOR INTERNET GAMES";
+            : "LAN ONLY - SET A MASTER SERVER IN SETTINGS > NETWORK FOR INTERNET GAMES";
         VectorFont.Draw(pb, master, new Vector2(cx, vp.Height - 80 * s), 10f * s, Palette.TextDim * 0.8f, TextAlign.Center);
         VectorFont.Draw(pb, _editing ? "TYPE HOST OR HOST:PORT   ENTER CONNECT   ESC DONE" : "ARROWS CHOOSE   ENTER JOIN   F5 REFRESH   ESC BACK",
             new Vector2(cx, vp.Height - 50 * s), 10f * s, Palette.TextDim * 0.6f, TextAlign.Center);

@@ -14,6 +14,9 @@ public sealed class MasterServer : IDisposable
     /// <summary>Servers that haven't checked in for this long are dropped from the list.</summary>
     private const double Expiry = 45;
     private const int EntriesPerPacket = 8;
+    /// <summary>Registration is unauthenticated, so cap how many servers one address, and everyone, can list.</summary>
+    private const int MaxServers = 500;
+    private const int MaxPerAddress = 4;
 
     private sealed class Registration
     {
@@ -72,6 +75,8 @@ public sealed class MasterServer : IDisposable
                     if (id.Length is 0 or > 32 || ServerInfo.Read(reader) is not { } info) return;
                     if (!_servers.TryGetValue(id, out var reg))
                     {
+                        if (_servers.Count >= MaxServers) return;
+                        if (_servers.Values.Count(s => s.External.Address.Equals(remote.Address)) >= MaxPerAddress) return;
                         reg = new Registration { Id = id, External = remote, Info = info };
                         _servers[id] = reg;
                         Log?.Invoke($"Server '{info.Name}' registered from {remote}");
@@ -88,7 +93,7 @@ public sealed class MasterServer : IDisposable
                     break;
             }
         }
-        catch (EndOfStreamException)
+        catch (Exception ex) when (MessageReader.IsMalformed(ex))
         {
         }
     }

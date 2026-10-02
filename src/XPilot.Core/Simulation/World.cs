@@ -40,11 +40,15 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         return ship;
     }
 
-    /// <summary>Takes a ship out of the game, dropping any ball it tows. Ids are never reused.</summary>
+    /// <summary>
+    /// Takes a ship out of the game, dropping any ball it tows and removing its bullets (team and kill credit
+    /// need a living owner). Ids are never reused.
+    /// </summary>
     public void RemoveShip(Ship ship)
     {
         if (!_shipsById.Remove(ship.Id)) return;
         if (CarriedBy(ship) is { } ball) DropBall(ball);
+        Bullets.RemoveAll(b => b.OwnerId == ship.Id);
         ship.Alive = false;
         Ships.Remove(ship);
     }

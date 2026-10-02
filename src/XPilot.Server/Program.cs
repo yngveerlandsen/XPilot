@@ -54,7 +54,12 @@ try
             case "--laps": options.Laps = int.Parse(Next()); break;
             case "--master": options.MasterServer = Next(); break;
             case "--run-master":
-                masterPort = i + 1 < args.Length && int.TryParse(args[i + 1], out int p) ? int.Parse(args[++i]) : Protocol.DefaultMasterPort;
+                masterPort = Protocol.DefaultMasterPort;
+                if (i + 1 < args.Length && int.TryParse(args[i + 1], out int p))
+                {
+                    masterPort = p;
+                    i++;
+                }
                 break;
             case "-h" or "--help" or "/?":
                 Console.WriteLine(Usage);

@@ -8,6 +8,9 @@
     <PackageReference Include="LiteNetLib" Version="2.1.4" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="XPilot.Net.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\XPilot.Core\XPilot.Core.csproj" />
   </ItemGroup>
 </Project>
