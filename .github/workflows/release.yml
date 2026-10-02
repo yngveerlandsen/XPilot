@@ -1,0 +1,57 @@
+name: Release
+
+# Pushing a tag like v0.2.0 builds the Windows zip and attaches it to that tag's GitHub release, creating the
+# release if it doesn't exist. Tags with a suffix (v0.2.0-beta.1) are marked as pre-releases.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build, e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test
+        run: dotnet test -c Release
+
+      - name: Publish
+        run: |
+          version="${TAG#v}"
+          dotnet publish src/XPilot.Desktop -c Release -r win-x64 --self-contained \
+            -p:Version="$version" -o "out/XPilot-$TAG-win-x64"
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path "out/XPilot-$env:TAG-win-x64" -DestinationPath "XPilot-$env:TAG-win-x64.zip"
+
+      - name: Upload to release
+        run: |
+          zip="XPilot-$TAG-win-x64.zip"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$zip" --clobber
+          else
+            prerelease=""
+            [[ "$TAG" == *-* ]] && prerelease="--prerelease"
+            gh release create "$TAG" "$zip" --title "$TAG" --generate-notes $prerelease
+          fi
