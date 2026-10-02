@@ -14,7 +14,7 @@ public sealed class DogfightRules(int scoreLimit = 10, float timeLimit = 300f) :
     public bool WeaponsEnabled => true;
     public bool ControlsLocked => false;
     public bool IsOver { get; private set; }
-    public float RespawnDelay => 2f;
+    public float RespawnDelay => 4f;
 
     public float TimeRemaining(World world) => TimeLimit > 0 ? MathF.Max(0f, TimeLimit - world.Time) : float.PositiveInfinity;
 

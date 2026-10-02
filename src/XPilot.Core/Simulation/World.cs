@@ -18,6 +18,8 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
     public Random Rng { get; } = new(seed);
     public List<Ship> Ships { get; } = [];
     public List<Bullet> Bullets { get; } = [];
+    /// <summary>Team balls; empty outside ball mode.</summary>
+    public List<Ball> Balls { get; } = [];
     /// <summary>Events produced by the last <see cref="Start"/> or <see cref="Step"/> call.</summary>
     public IReadOnlyList<GameEvent> Events => _events;
     public float Time { get; private set; }
@@ -52,6 +54,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
             s.PrevHeading = s.Heading;
         }
         foreach (var b in Bullets) b.PrevPosition = b.Position;
+        foreach (var b in Balls) b.PrevPosition = b.Position;
 
         bool locked = Rules.ControlsLocked;
         for (int i = 0; i < Ships.Count; i++)
@@ -60,6 +63,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         }
 
         ResolveShipCollisions();
+        UpdateBalls(dt);
         UpdateBullets(dt);
 
         Time += dt;
@@ -126,6 +130,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         victim.Thrusting = false;
         victim.Refueling = false;
         victim.RespawnTimer = Rules.RespawnDelay;
+        if (CarriedBy(victim) is { } ball) DropBall(ball);
         Emit(new GameEvent(GameEventType.ShipDestroyed, victim.Id, killer?.Id ?? -1, victim.Position, victim.Velocity, Cause: cause));
         Rules.OnShipDestroyed(this, victim, killer, cause);
     }
@@ -135,6 +140,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         var cfg = Config;
         if (!s.Alive)
         {
+            s.GrabHeld = false;
             if (s.RespawnTimer > 0f) s.RespawnTimer -= dt;
             if (s.RespawnTimer <= 0f && !Rules.IsOver) Rules.Respawn(this, s);
             return;
@@ -183,6 +189,114 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         if (input.Fire && !s.Shield && Rules.WeaponsEnabled && s.FireCooldown <= 0f && s.Fuel >= cfg.FireFuel)
         {
             FireBullet(s);
+        }
+
+        bool grabPressed = input.Grab && !s.GrabHeld;
+        s.GrabHeld = input.Grab;
+        if (grabPressed && Balls.Count > 0) ToggleGrab(s);
+    }
+
+    public Ball? CarriedBy(Ship s)
+    {
+        foreach (var b in Balls)
+        {
+            if (b.State == BallState.Carried && b.CarrierId == s.Id) return b;
+        }
+        return null;
+    }
+
+    /// <summary>Releases the towed ball, or attaches to the nearest free enemy ball in range.</summary>
+    private void ToggleGrab(Ship s)
+    {
+        if (CarriedBy(s) is { } carried)
+        {
+            DropBall(carried);
+            return;
+        }
+
+        Ball? best = null;
+        float bestDist = Config.GrabRange;
+        foreach (var b in Balls)
+        {
+            if (b.State == BallState.Carried || b.Team == s.Team) continue;
+            float d = Map.Distance(s.Position, b.Position);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = b;
+            }
+        }
+        if (best == null) return;
+
+        if (best.State == BallState.Home) best.Velocity = Vector2.Zero;
+        best.State = BallState.Carried;
+        best.CarrierId = s.Id;
+        best.LooseTime = 0f;
+        Emit(new GameEvent(GameEventType.BallGrabbed, s.Id, Position: best.Position, Value: best.Team));
+    }
+
+    private void DropBall(Ball ball)
+    {
+        int carrier = ball.CarrierId;
+        ball.State = BallState.Loose;
+        ball.CarrierId = -1;
+        ball.LooseTime = 0f;
+        Emit(new GameEvent(GameEventType.BallDropped, carrier, Position: ball.Position, Value: ball.Team));
+    }
+
+    private void UpdateBalls(float dt)
+    {
+        foreach (var ball in Balls)
+        {
+            if (ball.State == BallState.Home) continue;
+
+            ball.Velocity += GravityAt(ball.Position) * dt;
+            ball.Velocity *= MathF.Max(0f, 1f - 0.15f * dt);
+            ball.Position = Map.WrapPosition(ball.Position + ball.Velocity * dt);
+
+            if (ball.State == BallState.Carried)
+            {
+                var carrier = GetShip(ball.CarrierId);
+                if (carrier is { Alive: true }) ApplyRope(carrier, ball);
+                else DropBall(ball);
+            }
+
+            ResolveBallWalls(ball);
+            if (ball.State == BallState.Loose) ball.LooseTime += dt;
+        }
+    }
+
+    /// <summary>An inextensible rope: when taut it pulls ship and ball together, sharing the correction by mass.</summary>
+    private void ApplyRope(Ship ship, Ball ball)
+    {
+        var d = Map.Delta(ship.Position, ball.Position);
+        float dist = d.Length();
+        float length = Config.BallRopeLength;
+        if (dist <= length || dist < 1e-4f) return;
+
+        var n = d / dist;
+        float wShip = 1f, wBall = 1f / Config.BallMass, wSum = wShip + wBall;
+        float excess = dist - length;
+        ship.Position = Map.WrapPosition(ship.Position + n * (excess * wShip / wSum));
+        ball.Position = Map.WrapPosition(ball.Position - n * (excess * wBall / wSum));
+
+        float separating = Vector2.Dot(ball.Velocity - ship.Velocity, n);
+        if (separating > 0f)
+        {
+            float impulse = separating / wSum;
+            ship.Velocity += n * (impulse * wShip);
+            ball.Velocity -= n * (impulse * wBall);
+        }
+    }
+
+    private void ResolveBallWalls(Ball ball)
+    {
+        for (int iteration = 0; iteration < 3; iteration++)
+        {
+            if (!Map.FindDeepestContact(ball.Position, Config.BallRadius, out var n, out float depth)) break;
+            ball.Position = Map.WrapPosition(ball.Position + n * (depth + 0.01f));
+            float vn = Vector2.Dot(ball.Velocity, n);
+            if (vn < 0f) ball.Velocity -= n * (vn * 1.5f);
         }
     }
 
@@ -265,7 +379,8 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
                 float relVn = Vector2.Dot(b.Velocity - a.Velocity, n);
                 if (relVn >= 0f) continue;
 
-                if (cfg.ShipCollisionsKill && -relVn > cfg.CrashSpeed)
+                bool teammates = a.Team != Teams.None && a.Team == b.Team;
+                if (cfg.ShipCollisionsKill && !teammates && -relVn > cfg.CrashSpeed)
                 {
                     bool aDies = !a.IsProtected, bDies = !b.IsProtected;
                     if (aDies) Kill(a, bDies ? null : b, DeathCause.Collision);
@@ -313,10 +428,12 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
     {
         var cfg = Config;
         float hitRadius = cfg.ShipRadius + cfg.BulletRadius;
+        var owner = GetShip(b.OwnerId);
         foreach (var s in Ships)
         {
             if (!s.Alive) continue;
             if (s.Id == b.OwnerId && b.Age < cfg.SelfHitGrace) continue;
+            if (s.Id != b.OwnerId && s.Team != Teams.None && owner?.Team == s.Team) continue;
             if (Map.Delta(s.Position, b.Position).LengthSquared() >= hitRadius * hitRadius) continue;
 
             b.Dead = true;
@@ -327,7 +444,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
             }
             else
             {
-                Kill(s, GetShip(b.OwnerId), DeathCause.Bullet);
+                Kill(s, owner, DeathCause.Bullet);
             }
             return;
         }

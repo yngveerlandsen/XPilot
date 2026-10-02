@@ -2,6 +2,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using XPilot.Core;
 using XPilot.Core.Maps;
+using XPilot.Core.Rules;
 using XPilot.Core.Simulation;
 
 namespace XPilot.Desktop.Graphics;
@@ -47,10 +48,12 @@ public sealed class WorldRenderer
             var p = ToView(pos);
             if (!view.Contains(p, 20f)) continue;
             var owner = world.GetShip(b.OwnerId);
-            var color = Color.Lerp(owner != null ? Palette.Ship(owner.ColorIndex) : Color.White, Color.White, 0.5f);
+            var color = Color.Lerp(owner != null ? Palette.Ship(owner) : Color.White, Color.White, 0.5f);
             var dir = MathUtil.SafeNormalize(b.Velocity).ToXna();
             pb.GlowLine(p - dir * 7f, p, 2.5f, color);
         }
+
+        foreach (var ball in world.Balls) DrawBall(pb, world, ball, ToView, view, alpha, time);
 
         foreach (var s in world.Ships)
         {
@@ -61,11 +64,61 @@ public sealed class WorldRenderer
             DrawShip(pb, s, p, heading, time, s == match.Player);
         }
 
-        if (match.Player is { Alive: true, Finished: false } player && world.Rules.Mode == GameModeKind.Race)
+        if (match.Player is { Alive: true } player && Objective(match, player) is var (target, arrowColor, hideWithin))
         {
-            DrawCheckpointArrow(pb, ToView(Interpolate(player.PrevPosition, player.Position, alpha)), player);
+            DrawArrow(pb, ToView(Interpolate(player.PrevPosition, player.Position, alpha)), player, target, arrowColor, hideWithin);
         }
         pb.End();
+    }
+
+    /// <summary>Where the player should be heading: the next checkpoint, or the relevant ball or treasure.</summary>
+    private (System.Numerics.Vector2 Target, Color Color, float HideWithin)? Objective(Match match, Ship player)
+    {
+        var world = match.World;
+        if (world.Rules.Mode == GameModeKind.Race)
+        {
+            if (player.Finished) return null;
+            return (_map.Checkpoints[player.NextCheckpoint], Palette.Checkpoint * 0.8f, _map.CheckpointRadius + 60f);
+        }
+        if (world.Rules.Mode != GameModeKind.Ball || _map.TreasureOf(player.Team) is not { } home) return null;
+
+        if (world.CarriedBy(player) != null) return (home, Palette.Team(player.Team), 80f);
+        var ownBall = world.Balls.FirstOrDefault(b => b.Team == player.Team);
+        if (ownBall is { State: not BallState.Home }) return (ownBall.Position, Palette.Warning, 60f);
+        var enemyBall = world.Balls.FirstOrDefault(b => b.Team != player.Team);
+        if (enemyBall is { State: not BallState.Carried }) return (enemyBall.Position, Palette.Team(enemyBall.Team) * 0.8f, 80f);
+        return null;
+    }
+
+    private void DrawBall(PrimitiveBatch pb, World world, Ball ball, Func<System.Numerics.Vector2, Vector2> toView,
+        RectangleF view, float alpha, float time)
+    {
+        var p = toView(Interpolate(ball.PrevPosition, ball.Position, alpha));
+        var color = Palette.Team(ball.Team);
+        if (ball.State == BallState.Carried && world.GetShip(ball.CarrierId) is { Alive: true } carrier)
+        {
+            var c = toView(Interpolate(carrier.PrevPosition, carrier.Position, alpha));
+            pb.GlowLine(c, p, 1.5f, Color.Lerp(color, Color.White, 0.5f) * 0.8f, 0.6f);
+        }
+        if (!view.Contains(p, 40f)) return;
+
+        float radius = world.Config.BallRadius;
+        bool blink = ball.State == BallState.Loose && ((int)(time * 6f) & 1) == 0;
+        pb.Circle(p, radius, 2.5f, blink ? Color.White : color, 20, glow: 1.2f);
+        pb.Circle(p, radius * 0.45f, 1.5f, color * 0.7f, 12);
+    }
+
+    private void DrawArrow(PrimitiveBatch pb, Vector2 shipPos, Ship player, System.Numerics.Vector2 target, Color color, float hideWithin)
+    {
+        var d = _map.Delta(player.Position, target).ToXna();
+        float dist = d.Length();
+        if (dist < hideWithin) return;
+        var dir = d / dist;
+        var perp = new Vector2(-dir.Y, dir.X);
+        var tip = shipPos + dir * 58f;
+        var baseCenter = shipPos + dir * 46f;
+        pb.GlowLine(tip, baseCenter + perp * 7f, 2f, color);
+        pb.GlowLine(tip, baseCenter - perp * 7f, 2f, color);
     }
 
     private System.Numerics.Vector2 Interpolate(System.Numerics.Vector2 prev, System.Numerics.Vector2 current, float alpha) =>
@@ -73,7 +126,7 @@ public sealed class WorldRenderer
 
     private void DrawShip(PrimitiveBatch pb, Ship s, Vector2 pos, float heading, float time, bool isPlayer)
     {
-        var color = Palette.Ship(s.ColorIndex);
+        var color = Palette.Ship(s);
         float c = MathF.Cos(heading), sn = MathF.Sin(heading);
         Vector2 Rot(Vector2 v) => pos + new Vector2(v.X * c - v.Y * sn, v.X * sn + v.Y * c);
 
@@ -105,30 +158,30 @@ public sealed class WorldRenderer
         }
     }
 
-    private void DrawCheckpointArrow(PrimitiveBatch pb, Vector2 shipPos, Ship player)
-    {
-        var target = _map.Checkpoints[player.NextCheckpoint];
-        var d = _map.Delta(player.Position, target).ToXna();
-        float dist = d.Length();
-        if (dist < _map.CheckpointRadius + 60f) return;
-        var dir = d / dist;
-        var perp = new Vector2(-dir.Y, dir.X);
-        var tip = shipPos + dir * 58f;
-        var baseCenter = shipPos + dir * 46f;
-        var color = Palette.Checkpoint * 0.8f;
-        pb.GlowLine(tip, baseCenter + perp * 7f, 2f, color);
-        pb.GlowLine(tip, baseCenter - perp * 7f, 2f, color);
-    }
-
     private void DrawMapObjects(PrimitiveBatch pb, Match match, Func<System.Numerics.Vector2, Vector2> toView, RectangleF view, float time)
     {
         var world = match.World;
 
-        foreach (var b in _map.Bases)
+        for (int i = 0; i < _map.Bases.Count; i++)
         {
-            var p = toView(b);
+            var p = toView(_map.Bases[i]);
             if (!view.Contains(p, 40f)) continue;
-            pb.GlowLine(p + new Vector2(-13, 15), p + new Vector2(13, 15), 2f, Palette.Base, 0.6f);
+            int team = i < _map.BaseTeams.Count ? _map.BaseTeams[i] : Teams.None;
+            var color = team == Teams.None ? Palette.Base : Palette.Team(team) * 0.6f;
+            pb.GlowLine(p + new Vector2(-13, 15), p + new Vector2(13, 15), 2f, color, 0.6f);
+        }
+
+        foreach (var t in _map.Treasures)
+        {
+            var p = toView(t.Position);
+            if (!view.Contains(p, 60f)) continue;
+            var color = Palette.Team(t.Team);
+            const float h = 24f;
+            // An open-topped box, like XPilot's treasure.
+            pb.GlowLine(p + new Vector2(-h, -h * 0.4f), p + new Vector2(-h, h), 2.5f, color);
+            pb.GlowLine(p + new Vector2(-h, h), p + new Vector2(h, h), 2.5f, color);
+            pb.GlowLine(p + new Vector2(h, h), p + new Vector2(h, -h * 0.4f), 2.5f, color);
+            pb.Circle(p, BallRules.CaptureRadius, 1f, color * (0.25f + 0.1f * MathF.Sin(time * 3f)), 32, dashed: true, rotation: -time * 0.5f);
         }
 
         foreach (var f in _map.FuelStations)

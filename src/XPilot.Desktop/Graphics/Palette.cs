@@ -32,5 +32,26 @@ public static class Palette
         new(200, 255, 200),
     ];
 
+    public static readonly Color RedTeam = new(255, 90, 90);
+    public static readonly Color BlueTeam = new(80, 165, 255);
+
+    private static readonly Color[] RedShades = [new(255, 90, 90), new(255, 150, 80), new(255, 110, 175), new(220, 60, 60)];
+    private static readonly Color[] BlueShades = [new(80, 165, 255), new(90, 230, 255), new(150, 140, 255), new(60, 110, 240)];
+
     public static Color Ship(int index) => ShipColors[index % ShipColors.Length];
+
+    /// <summary>Team shades in team modes, otherwise the ship's own color.</summary>
+    public static Color Ship(Core.Simulation.Ship ship) => ship.Team switch
+    {
+        Core.Maps.Teams.Red => RedShades[ship.Id % RedShades.Length],
+        Core.Maps.Teams.Blue => BlueShades[ship.Id % BlueShades.Length],
+        _ => Ship(ship.ColorIndex),
+    };
+
+    public static Color Team(int team) => team switch
+    {
+        Core.Maps.Teams.Red => RedTeam,
+        Core.Maps.Teams.Blue => BlueTeam,
+        _ => Text,
+    };
 }

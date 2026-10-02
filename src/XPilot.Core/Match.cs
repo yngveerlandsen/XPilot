@@ -13,8 +13,12 @@ public sealed class MatchSetup
     public bool IncludePlayer { get; init; } = true;
     public string PlayerName { get; init; } = "Player";
     public int Seed { get; init; } = Environment.TickCount;
+    /// <summary>Dogfight kills needed to win.</summary>
     public int ScoreLimit { get; init; } = 10;
-    public float TimeLimit { get; init; } = 300f;
+    /// <summary>Ball mode captures needed to win.</summary>
+    public int CaptureLimit { get; init; } = 3;
+    /// <summary>Seconds (0 = unlimited). Defaults to 5 minutes for dogfight, 10 for ball mode.</summary>
+    public float? TimeLimit { get; init; }
     public int? Laps { get; init; }
     public GameConfig? Config { get; init; }
 }
@@ -34,25 +38,36 @@ public sealed class Match
         var map = setup.Map;
         var config = (setup.Config ?? new GameConfig()).Clone();
         IGameRules rules;
-        if (map.Mode == GameModeKind.Race)
+        switch (map.Mode)
         {
-            rules = new RaceRules(setup.Laps ?? map.Laps);
-            config.ShipCollisionsKill = false;
-        }
-        else
-        {
-            rules = new DogfightRules(setup.ScoreLimit, setup.TimeLimit);
+            case GameModeKind.Race:
+                rules = new RaceRules(setup.Laps ?? map.Laps);
+                config.ShipCollisionsKill = false;
+                break;
+            case GameModeKind.Ball:
+                rules = new BallRules(setup.CaptureLimit, setup.TimeLimit ?? 600f);
+                break;
+            default:
+                rules = new DogfightRules(setup.ScoreLimit, setup.TimeLimit ?? 300f);
+                break;
         }
 
         World = new World(map, config, rules, setup.Seed);
         Nav = new NavGrid(map);
+        bool teams = map.Mode == GameModeKind.Ball;
 
-        if (setup.IncludePlayer) Player = World.AddShip(setup.PlayerName, false);
+        if (setup.IncludePlayer)
+        {
+            Player = World.AddShip(setup.PlayerName, false);
+            if (teams) Player.Team = Teams.Red;
+        }
         int botCount = Math.Clamp(setup.BotCount, 0, map.Bases.Count - (Player != null ? 1 : 0));
         var rng = new Random(setup.Seed);
         for (int i = 0; i < botCount; i++)
         {
             var ship = World.AddShip(BotNames[i % BotNames.Length], true);
+            // Fill teams alternately, starting with the side the player is not on.
+            if (teams) ship.Team = (i % 2 == 0) == (Player != null) ? Teams.Blue : Teams.Red;
             _bots.Add(new BotController(World, Nav, ship, setup.Difficulty, rng.Next()));
         }
 

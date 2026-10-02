@@ -16,6 +16,7 @@ public sealed class Settings
     public string Mode { get; set; } = "Dogfight";
     public string? LastDogfightMap { get; set; }
     public string? LastRaceMap { get; set; }
+    public string? LastBallMap { get; set; }
     public int Bots { get; set; } = 3;
     public string Difficulty { get; set; } = "Normal";
 

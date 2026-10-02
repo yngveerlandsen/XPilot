@@ -13,6 +13,8 @@ public struct ShipInput
     public bool Thrust;
     public bool Fire;
     public bool Shield;
+    /// <summary>Pressing (not holding) attaches to a nearby enemy ball, or releases the towed one.</summary>
+    public bool Grab;
 }
 
 public sealed class Ship(int id, string name, bool isBot, int colorIndex)
@@ -21,6 +23,10 @@ public sealed class Ship(int id, string name, bool isBot, int colorIndex)
     public string Name { get; } = name;
     public bool IsBot { get; } = isBot;
     public int ColorIndex { get; } = colorIndex;
+    /// <summary><see cref="Maps.Teams.None"/> in free-for-all modes.</summary>
+    public int Team = Maps.Teams.None;
+    /// <summary>Grab state on the previous tick, so a held key only toggles once.</summary>
+    public bool GrabHeld;
 
     public Vector2 Position;
     public Vector2 PrevPosition;
@@ -65,6 +71,31 @@ public sealed class Bullet
     public bool Dead;
 }
 
+public enum BallState { Home, Carried, Loose }
+
+/// <summary>A team's ball. It rests in its treasure until an enemy tows it away on a rope.</summary>
+public sealed class Ball(int team, Vector2 home)
+{
+    public int Team { get; } = team;
+    public Vector2 Home { get; } = home;
+    public Vector2 Position = home;
+    public Vector2 PrevPosition = home;
+    public Vector2 Velocity;
+    public BallState State = BallState.Home;
+    public int CarrierId = -1;
+    /// <summary>Seconds since the ball was dropped.</summary>
+    public float LooseTime;
+
+    public void ResetHome()
+    {
+        State = BallState.Home;
+        Position = PrevPosition = Home;
+        Velocity = Vector2.Zero;
+        CarrierId = -1;
+        LooseTime = 0f;
+    }
+}
+
 public enum GameEventType
 {
     ShipSpawned,
@@ -79,6 +110,14 @@ public enum GameEventType
     CountdownTick,
     RaceStarted,
     MatchOver,
+    /// <summary>ShipId grabbed the ball of team Value.</summary>
+    BallGrabbed,
+    /// <summary>ShipId (the former carrier) let go of the ball of team Value.</summary>
+    BallDropped,
+    /// <summary>ShipId scored with the ball of team Value.</summary>
+    BallCaptured,
+    /// <summary>The ball of team Value went home; ShipId is the teammate who returned it, or -1 on timeout.</summary>
+    BallReturned,
 }
 
 public enum DeathCause { None, Bullet, Wall, Collision }

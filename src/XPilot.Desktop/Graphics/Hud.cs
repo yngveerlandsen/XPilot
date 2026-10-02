@@ -87,6 +87,7 @@ public sealed class Hud
 
         if (world.Rules is RaceRules race) DrawRaceInfo(pb, vp, s, match, race);
         else if (world.Rules is DogfightRules dogfight) DrawDogfightInfo(pb, vp, s, match, dogfight);
+        else if (world.Rules is BallRules ball) DrawBallInfo(pb, vp, s, match, ball, time);
 
         if (player != null) DrawShipStatus(pb, vp, s, world, player, time);
         DrawCenterMessage(pb, vp, s);
@@ -126,6 +127,16 @@ public sealed class Hud
         Vector2 ToRadar(System.Numerics.Vector2 p) => origin + p.ToXna() / Map.TileSize * scale;
 
         foreach (var f in _map.FuelStations) pb.FilledCircle(ToRadar(f), 2f, Palette.Fuel * 0.8f, 8);
+        foreach (var t in _map.Treasures)
+        {
+            var c = ToRadar(t.Position);
+            pb.RectOutline(c.X - 4f, c.Y - 4f, 8f, 8f, 1f, Palette.Team(t.Team));
+        }
+        foreach (var ball in match.World.Balls)
+        {
+            if (ball.State == BallState.Loose && ((int)(time * 6f) & 1) == 1) continue;
+            pb.Circle(ToRadar(ball.Position), 3f, 1.5f, Palette.Team(ball.Team), 10);
+        }
 
         if (match.World.Rules.Mode == GameModeKind.Race)
         {
@@ -149,7 +160,7 @@ public sealed class Hud
             }
             else
             {
-                pb.FilledCircle(p, 2.5f, Palette.Ship(ship.ColorIndex), 8);
+                pb.FilledCircle(p, 2.5f, Palette.Ship(ship), 8);
             }
         }
     }
@@ -162,6 +173,46 @@ public sealed class Hud
             float fade = age > FeedLifetime - 1f ? FeedLifetime - age : 1f;
             VectorFont.Draw(pb, text, new Vector2(vp.Width - 14f * s, y), 11f * s, color * fade, TextAlign.Right);
             y += 18f * s;
+        }
+    }
+
+    private static void DrawBallInfo(PrimitiveBatch pb, Viewport vp, float s, Match match, BallRules rules, float time)
+    {
+        var world = match.World;
+        var player = match.Player;
+        float cx = vp.Width / 2f;
+
+        // "RED 1 : 2 BLUE" with each half in its team color.
+        string red = $"RED {rules.TeamScore(Teams.Red)}", blue = $"{rules.TeamScore(Teams.Blue)} BLUE";
+        float size = 20f * s;
+        VectorFont.Draw(pb, red, new Vector2(cx - 14 * s, 16 * s), size, Palette.RedTeam, TextAlign.Right);
+        VectorFont.Draw(pb, ":", new Vector2(cx, 16 * s), size, Palette.Text, TextAlign.Center);
+        VectorFont.Draw(pb, blue, new Vector2(cx + 14 * s, 16 * s), size, Palette.BlueTeam);
+
+        string clock = rules.TimeLimit > 0 ? FormatClock(rules.TimeRemaining(world)) + "   " : "";
+        VectorFont.Draw(pb, $"{clock}FIRST TO {rules.CaptureLimit}", new Vector2(cx, 46 * s), 10f * s, Palette.TextDim, TextAlign.Center);
+
+        if (player == null) return;
+        var teamColor = Palette.Team(player.Team);
+        VectorFont.Draw(pb, $"{Teams.Name(player.Team).ToUpperInvariant()} TEAM", new Vector2(16 * s, 16 * s), 22f * s, teamColor);
+        VectorFont.Draw(pb, $"SCORE {player.Score}   KILLS {player.Kills}   DEATHS {player.Deaths}", new Vector2(16 * s, 48 * s), 11f * s, Palette.TextDim);
+
+        float y = 70 * s;
+        foreach (var ball in world.Balls)
+        {
+            bool ours = ball.Team == player.Team;
+            var carrier = world.GetShip(ball.CarrierId);
+            string state = ball.State switch
+            {
+                BallState.Home => ours ? "SAFE" : "AT HOME",
+                BallState.Carried when carrier == player => "YOU HAVE IT - TOW IT HOME",
+                BallState.Carried => $"TAKEN BY {carrier?.Name.ToUpperInvariant()}",
+                _ => $"DROPPED ({MathF.Ceiling(BallRules.ReturnTime - ball.LooseTime)})",
+            };
+            bool alarm = ours && ball.State != BallState.Home;
+            var color = alarm && ((int)(time * 4f) & 1) == 0 ? Palette.Warning : Palette.Team(ball.Team);
+            VectorFont.Draw(pb, $"{(ours ? "OUR" : "ENEMY")} BALL: {state}", new Vector2(16 * s, y), 11f * s, color);
+            y += 18 * s;
         }
     }
 
@@ -295,12 +346,15 @@ public sealed class Hud
         for (int i = 0; i < standings.Count; i++)
         {
             var ship = standings[i];
-            var color = Palette.Ship(ship.ColorIndex);
+            var color = Palette.Ship(ship);
             if (ship == match.Player)
             {
                 pb.Rect(x + 8 * s, ty - 6 * s, w - 16 * s, rowH - 2 * s, color * 0.12f);
             }
-            VectorFont.Draw(pb, (i + 1).ToString(), new Vector2(x + 20 * s, ty), size, color);
+            string rank = world.Rules is BallRules ball
+                ? $"{Teams.Name(ship.Team)[0]}{ball.TeamScore(ship.Team)}"
+                : (i + 1).ToString();
+            VectorFont.Draw(pb, rank, new Vector2(x + 20 * s, ty), size, color);
             VectorFont.Draw(pb, ship.Name, new Vector2(x + 60 * s, ty), size, color);
             if (race)
             {

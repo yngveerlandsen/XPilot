@@ -2,6 +2,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
 using XPilot.Core;
 using XPilot.Core.Maps;
+using XPilot.Core.Rules;
 using XPilot.Desktop.Graphics;
 
 namespace XPilot.Desktop.Screens;
@@ -39,10 +40,18 @@ public sealed class ResultsScreen(XPilotGame game, Match match, MatchSetup setup
         float cx = vp.Width / 2f;
         string title = world.Rules.Mode == GameModeKind.Race ? "RACE RESULTS" : "MATCH RESULTS";
         VectorFont.Draw(pb, title, new Vector2(cx, 50 * s), 32f * s, Palette.Accent, TextAlign.Center, 3f * s);
-        if (winner != null)
+        if (world.Rules is BallRules ball)
+        {
+            int team = ball.WinningTeam;
+            string headline = team == Teams.None ? "DRAW"
+                : match.Player?.Team == team ? "YOUR TEAM WINS!"
+                : $"{Teams.Name(team).ToUpperInvariant()} TEAM WINS";
+            VectorFont.Draw(pb, headline, new Vector2(cx, 100 * s), 18f * s, Palette.Team(team), TextAlign.Center);
+        }
+        else if (winner != null)
         {
             string headline = playerWon ? "VICTORY!" : $"{winner.Name.ToUpperInvariant()} WINS";
-            VectorFont.Draw(pb, headline, new Vector2(cx, 100 * s), 18f * s, Palette.Ship(winner.ColorIndex), TextAlign.Center);
+            VectorFont.Draw(pb, headline, new Vector2(cx, 100 * s), 18f * s, Palette.Ship(winner), TextAlign.Center);
         }
         VectorFont.Draw(pb, $"{world.Map.Name.ToUpperInvariant()}   {setup.Difficulty.ToString().ToUpperInvariant()} BOTS",
             new Vector2(cx, 132 * s), 10f * s, Palette.TextDim, TextAlign.Center);

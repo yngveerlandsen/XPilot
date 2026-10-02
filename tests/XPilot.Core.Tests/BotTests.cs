@@ -62,6 +62,48 @@ public class BotTests(ITestOutputHelper output)
         Assert.All(match.World.Ships, s => Assert.True(s.Finished, $"{s.Name} did not finish (lap {s.Lap}, next cp {s.NextCheckpoint + 1})"));
     }
 
+    /// <summary>Hits (kills or shield hits) landed per bot per minute in a bots-only arena match.</summary>
+    private double MeasureHitRate(BotDifficulty difficulty)
+    {
+        var match = new Match(new MatchSetup
+        {
+            Map = TestUtil.LoadMap("arena"),
+            IncludePlayer = false,
+            BotCount = 6,
+            Difficulty = difficulty,
+            ScoreLimit = 0,
+            TimeLimit = 0,
+            Seed = 11,
+        });
+        int shots = 0, hits = 0;
+        for (int tick = 0; tick < 180 * GameConfig.TickRate; tick++)
+        {
+            match.Step();
+            foreach (var e in match.World.Events)
+            {
+                if (e.Type == GameEventType.ShipFired) shots++;
+                if (e.Type == GameEventType.ShieldHit || e is { Type: GameEventType.ShipDestroyed, Cause: DeathCause.Bullet }) hits++;
+            }
+        }
+        double botMinutes = 3.0 * 6;
+        double hitRate = hits / botMinutes;
+        output.WriteLine($"{difficulty}: shots={shots} hits={hits} accuracy={(shots == 0 ? 0 : hits / (double)shots):P1} " +
+                         $"shots/min/bot={shots / botMinutes:F1} hits/min/bot={hitRate:F1}");
+        return hitRate;
+    }
+
+    [Fact]
+    public void BotAccuracy_ScalesWithDifficulty()
+    {
+        double easy = MeasureHitRate(BotDifficulty.Easy);
+        double normal = MeasureHitRate(BotDifficulty.Normal);
+        double hard = MeasureHitRate(BotDifficulty.Hard);
+        Assert.True(easy < normal && normal < hard, "hit rate should increase with difficulty");
+        // Before tuning these were 17.6 (easy) and 40.9 (normal) hits per bot per minute.
+        Assert.True(easy < 4, $"easy bots land {easy:F1} hits per minute");
+        Assert.True(normal < 10, $"normal bots land {normal:F1} hits per minute");
+    }
+
     [Theory]
     [MemberData(nameof(DogfightMaps))]
     public void DogfightBots_FightWithoutGettingStuckInWalls(string mapName)

@@ -14,10 +14,29 @@ public enum TileShape : byte
 
 public enum TileSide { Top, Right, Bottom, Left }
 
-public enum GameModeKind { Dogfight, Race }
+public enum GameModeKind { Dogfight, Race, Ball }
+
+public static class Teams
+{
+    public const int None = -1;
+    public const int Red = 0;
+    public const int Blue = 1;
+
+    public static string Name(int team) => team switch
+    {
+        Red => "Red",
+        Blue => "Blue",
+        _ => "None",
+    };
+
+    public static int Opponent(int team) => team == Red ? Blue : Red;
+}
 
 /// <param name="Sign">+1 attracts, -1 repels.</param>
 public readonly record struct GravitySource(Vector2 Position, float Sign);
+
+/// <summary>Where a team's ball lives, and where enemy balls must be brought to score.</summary>
+public readonly record struct Treasure(Vector2 Position, int Team);
 
 public sealed class Map
 {
@@ -43,6 +62,9 @@ public sealed class Map
     public int Laps { get; init; } = 3;
     public float CheckpointRadius { get; init; } = 96f;
     public IReadOnlyList<Vector2> Bases { get; init; } = [];
+    /// <summary>Team of each entry in <see cref="Bases"/> (<see cref="Teams.None"/> for neutral bases).</summary>
+    public IReadOnlyList<int> BaseTeams { get; init; } = [];
+    public IReadOnlyList<Treasure> Treasures { get; init; } = [];
     public IReadOnlyList<Vector2> FuelStations { get; init; } = [];
     /// <summary>Race checkpoints in the order they must be passed.</summary>
     public IReadOnlyList<Vector2> Checkpoints { get; init; } = [];
@@ -51,6 +73,22 @@ public sealed class Map
 
     public int Width { get; }
     public int Height { get; }
+
+    /// <summary>The team's own bases, or every base when the map has none for that team.</summary>
+    public IReadOnlyList<Vector2> TeamBases(int team)
+    {
+        var own = Bases.Where((_, i) => i < BaseTeams.Count && BaseTeams[i] == team).ToList();
+        return own.Count > 0 ? own : Bases;
+    }
+
+    public Vector2? TreasureOf(int team)
+    {
+        foreach (var t in Treasures)
+        {
+            if (t.Team == team) return t.Position;
+        }
+        return null;
+    }
     public float PixelWidth => Width * TileSize;
     public float PixelHeight => Height * TileSize;
 

@@ -34,7 +34,14 @@ public sealed class MainMenuScreen : Screen
     private IReadOnlyList<Map> MapsForMode => Game.Maps.ForMode(_mode);
     private Map? CurrentMap => MapsForMode.Count > 0 ? MapsForMode[Math.Clamp(_mapIndex, 0, MapsForMode.Count - 1)] : null;
     private int MaxBots => CurrentMap is { } m ? Math.Min(7, m.Bases.Count - 1) : 0;
-    private int MinBots => _mode == GameModeKind.Dogfight ? 1 : 0;
+    private int MinBots => _mode == GameModeKind.Race ? 0 : 1;
+
+    private static string ModeName(GameModeKind mode) => mode switch
+    {
+        GameModeKind.Race => "RACE",
+        GameModeKind.Ball => "CAPTURE THE BALL",
+        _ => "DOGFIGHT",
+    };
 
     public override void Enter() => Sounds.StopAll();
 
@@ -62,7 +69,7 @@ public sealed class MainMenuScreen : Screen
         switch (Items[_selected])
         {
             case Item.Mode:
-                _mode = _mode == GameModeKind.Dogfight ? GameModeKind.Race : GameModeKind.Dogfight;
+                _mode = (GameModeKind)(((int)_mode + delta + 3) % 3);
                 SelectRememberedMap();
                 break;
             case Item.Map:
@@ -111,8 +118,12 @@ public sealed class MainMenuScreen : Screen
         s.Mode = _mode.ToString();
         s.Bots = _bots;
         s.Difficulty = _difficulty.ToString();
-        if (_mode == GameModeKind.Race) s.LastRaceMap = map.Name;
-        else s.LastDogfightMap = map.Name;
+        switch (_mode)
+        {
+            case GameModeKind.Race: s.LastRaceMap = map.Name; break;
+            case GameModeKind.Ball: s.LastBallMap = map.Name; break;
+            default: s.LastDogfightMap = map.Name; break;
+        }
         s.Save();
 
         Sounds.Play("go", 0.7f);
@@ -127,7 +138,12 @@ public sealed class MainMenuScreen : Screen
 
     private void SelectRememberedMap()
     {
-        var name = _mode == GameModeKind.Race ? Game.Settings.LastRaceMap : Game.Settings.LastDogfightMap;
+        var name = _mode switch
+        {
+            GameModeKind.Race => Game.Settings.LastRaceMap,
+            GameModeKind.Ball => Game.Settings.LastBallMap,
+            _ => Game.Settings.LastDogfightMap,
+        };
         var maps = MapsForMode;
         _mapIndex = 0;
         for (int i = 0; i < maps.Count; i++)
@@ -162,12 +178,12 @@ public sealed class MainMenuScreen : Screen
             if (item == Item.Start) y += 14 * s;
             var (label, value) = item switch
             {
-                Item.Mode => ("MODE", _mode == GameModeKind.Race ? "RACE" : "DOGFIGHT"),
+                Item.Mode => ("MODE", ModeName(_mode)),
                 Item.Map => ("MAP", CurrentMap?.Name.ToUpperInvariant() ?? "NONE"),
                 Item.Bots => ("BOTS", _bots.ToString()),
                 Item.Difficulty => ("SKILL", _difficulty.ToString().ToUpperInvariant()),
                 Item.Controls => ("CONTROLS", Game.Settings.ControlPreset.ToUpperInvariant()),
-                Item.Start => (_mode == GameModeKind.Race ? "START RACE" : "START DOGFIGHT", null),
+                Item.Start => ("START " + ModeName(_mode), null),
                 _ => ("QUIT", (string?)null),
             };
             if (selected) color *= 0.85f + 0.15f * MathF.Sin(_time * 8f);
@@ -192,7 +208,7 @@ public sealed class MainMenuScreen : Screen
         float hy = vp.Height - 90 * s;
         string controls = $"TURN {bindings.Describe(GameAction.TurnLeft)} {bindings.Describe(GameAction.TurnRight)}   " +
                           $"THRUST {bindings.Describe(GameAction.Thrust)}   FIRE {bindings.Describe(GameAction.Fire)}   " +
-                          $"SHIELD {bindings.Describe(GameAction.Shield)}";
+                          $"SHIELD {bindings.Describe(GameAction.Shield)}   GRAB {bindings.Describe(GameAction.Grab)}";
         VectorFont.Draw(pb, controls, new Vector2(cx, hy), 10f * s, Palette.TextDim, TextAlign.Center);
         VectorFont.Draw(pb, "TAB SCORES   ESC PAUSE   F11 FULLSCREEN   GAMEPAD SUPPORTED",
             new Vector2(cx, hy + 22 * s), 10f * s, Palette.TextDim * 0.8f, TextAlign.Center);

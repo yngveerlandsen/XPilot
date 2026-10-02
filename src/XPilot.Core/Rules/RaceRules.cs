@@ -23,7 +23,7 @@ public sealed class RaceRules(int laps) : IGameRules
     public bool WeaponsEnabled => false;
     public bool ControlsLocked { get; private set; } = true;
     public bool IsOver { get; private set; }
-    public float RespawnDelay => 1.5f;
+    public float RespawnDelay => 2.5f;
 
     /// <summary>Seconds left of the grace period after the first finisher, if it has started.</summary>
     public float? GraceRemaining(World world) =>

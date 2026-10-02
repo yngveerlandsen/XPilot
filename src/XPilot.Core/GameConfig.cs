@@ -40,5 +40,12 @@ public sealed class GameConfig
 
     public bool ShipCollisionsKill { get; set; } = true;
 
+    public float BallRadius { get; set; } = 10f;
+    /// <summary>Ball mass relative to a ship; a heavier ball drags the towing ship around more.</summary>
+    public float BallMass { get; set; } = 1f;
+    public float BallRopeLength { get; set; } = 90f;
+    /// <summary>How close a ship must be to latch onto a ball.</summary>
+    public float GrabRange { get; set; } = 70f;
+
     public GameConfig Clone() => (GameConfig)MemberwiseClone();
 }

@@ -3,7 +3,7 @@ using XPilot.Core.Simulation;
 
 namespace XPilot.Desktop.Input;
 
-public enum GameAction { TurnLeft, TurnRight, Thrust, Fire, Shield }
+public enum GameAction { TurnLeft, TurnRight, Thrust, Fire, Shield, Grab }
 
 /// <summary>Maps keys to ship controls. Presets can be overridden per action in settings.json.</summary>
 public sealed class InputBindings
@@ -28,6 +28,7 @@ public sealed class InputBindings
         [GameAction.Thrust] = [Keys.Up, Keys.W],
         [GameAction.Fire] = [Keys.Space, Keys.LeftControl, Keys.RightControl],
         [GameAction.Shield] = [Keys.Down, Keys.S, Keys.LeftShift],
+        [GameAction.Grab] = [Keys.E, Keys.RightShift],
     });
 
     /// <summary>The original XPilot layout: A/S turn, Shift thrusts, Enter fires, Space shields.</summary>
@@ -38,6 +39,7 @@ public sealed class InputBindings
         [GameAction.Thrust] = [Keys.LeftShift, Keys.RightShift],
         [GameAction.Fire] = [Keys.Enter],
         [GameAction.Shield] = [Keys.Space],
+        [GameAction.Grab] = [Keys.LeftControl, Keys.RightControl],
     });
 
     public static InputBindings FromSettings(Settings settings)
@@ -68,6 +70,7 @@ public sealed class InputBindings
         bool thrust = IsDown(input, GameAction.Thrust);
         bool fire = IsDown(input, GameAction.Fire);
         bool shield = IsDown(input, GameAction.Shield);
+        bool grab = IsDown(input, GameAction.Grab);
 
         var pad = input.Pad;
         if (pad.IsConnected)
@@ -79,9 +82,10 @@ public sealed class InputBindings
             thrust |= pad.Triggers.Right > 0.3f || pad.IsButtonDown(Buttons.A);
             fire |= pad.IsButtonDown(Buttons.RightShoulder) || pad.IsButtonDown(Buttons.X);
             shield |= pad.Triggers.Left > 0.3f || pad.IsButtonDown(Buttons.LeftShoulder) || pad.IsButtonDown(Buttons.B);
+            grab |= pad.IsButtonDown(Buttons.Y);
         }
 
-        return new ShipInput { Turn = Math.Clamp(turn, -1f, 1f), Thrust = thrust, Fire = fire, Shield = shield };
+        return new ShipInput { Turn = Math.Clamp(turn, -1f, 1f), Thrust = thrust, Fire = fire, Shield = shield, Grab = grab };
     }
 
     private static string KeyName(Keys key) => key switch

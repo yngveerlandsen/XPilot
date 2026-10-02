@@ -13,8 +13,9 @@ public sealed class MapFormatException(string message) : Exception(message);
 ///   _        ship base (spawn)     F         fuel station
 ///   +        gravity attractor     -         gravity repeller
 ///   1..9     race checkpoints      . or ' '  empty space
+///   r b      red / blue team base  R B       red / blue treasure (ball home)
 /// </code>
-/// Header keys: name, description, mode (dogfight|race), size (W H), border (true adds a wall frame),
+/// Header keys: name, description, mode (dogfight|race|ball), size (W H), border (true adds a wall frame),
 /// wrap, gravity (X Y), attractor (strength), laps, checkpoint_radius.
 /// </summary>
 public static class MapLoader
@@ -75,6 +76,8 @@ public static class MapLoader
         }
 
         var bases = new List<Vector2>();
+        var baseTeams = new List<int>();
+        var treasures = new List<Treasure>();
         var fuel = new List<Vector2>();
         var gravity = new List<GravitySource>();
         var checkpoints = new SortedDictionary<int, Vector2>();
@@ -96,7 +99,15 @@ public static class MapLoader
                     case 'w': shape = TileShape.SolidTopRight; break;
                     case 'a': shape = TileShape.SolidBottomLeft; break;
                     case 's': shape = TileShape.SolidBottomRight; break;
-                    case '_': bases.Add(center); break;
+                    case '_': bases.Add(center); baseTeams.Add(Teams.None); break;
+                    case 'r': bases.Add(center); baseTeams.Add(Teams.Red); break;
+                    case 'b': bases.Add(center); baseTeams.Add(Teams.Blue); break;
+                    case 'R' or 'B':
+                        int team = c == 'R' ? Teams.Red : Teams.Blue;
+                        if (treasures.Any(t => t.Team == team))
+                            throw new MapFormatException($"Treasure '{c}' appears more than once.");
+                        treasures.Add(new Treasure(center, team));
+                        break;
                     case 'F': fuel.Add(center); break;
                     case '+': gravity.Add(new GravitySource(center, 1f)); break;
                     case '-': gravity.Add(new GravitySource(center, -1f)); break;
@@ -124,13 +135,26 @@ public static class MapLoader
             {
                 "race" => GameModeKind.Race,
                 "dogfight" => GameModeKind.Dogfight,
+                "ball" => GameModeKind.Ball,
                 _ => throw new MapFormatException($"Unknown mode '{modeText}'."),
             }
-            : orderedCheckpoints.Count > 0 ? GameModeKind.Race : GameModeKind.Dogfight;
+            : treasures.Count > 0 ? GameModeKind.Ball
+            : orderedCheckpoints.Count > 0 ? GameModeKind.Race
+            : GameModeKind.Dogfight;
 
         if (bases.Count == 0) throw new MapFormatException("Map has no bases ('_').");
         if (mode == GameModeKind.Race && orderedCheckpoints.Count < 2)
             throw new MapFormatException("Race maps need at least two checkpoints.");
+        if (mode == GameModeKind.Ball)
+        {
+            foreach (int team in new[] { Teams.Red, Teams.Blue })
+            {
+                if (!treasures.Any(t => t.Team == team))
+                    throw new MapFormatException($"Ball maps need a {Teams.Name(team)} treasure ('{(team == Teams.Red ? 'R' : 'B')}').");
+                if (!baseTeams.Contains(team))
+                    throw new MapFormatException($"Ball maps need {Teams.Name(team)} team bases ('{(team == Teams.Red ? 'r' : 'b')}').");
+            }
+        }
 
         return new Map(w, h, tiles)
         {
@@ -143,6 +167,8 @@ public static class MapLoader
             Laps = (int)GetFloat(header, "laps", 3),
             CheckpointRadius = GetFloat(header, "checkpoint_radius", 96f),
             Bases = bases,
+            BaseTeams = baseTeams,
+            Treasures = treasures,
             FuelStations = fuel,
             Checkpoints = orderedCheckpoints,
             GravitySources = gravity,

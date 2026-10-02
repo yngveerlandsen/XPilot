@@ -13,13 +13,18 @@ public enum BotDifficulty { Easy, Normal, Hard }
 /// <param name="ShieldSkill">Chance of raising the shield against an incoming bullet.</param>
 /// <param name="Standoff">Preferred distance to a visible target.</param>
 /// <param name="Gain">How aggressively velocity errors are corrected (1/s).</param>
-public sealed record BotProfile(float ThinkInterval, float AimNoise, float FireAngle, float MaxSpeed, float ShieldSkill, float Standoff, float Gain)
+/// <param name="LeadSkill">How much of the target's movement is predicted when leading a shot (0..1).</param>
+/// <param name="ShotInterval">Average seconds between shots; bots don't just hold the trigger.</param>
+/// <param name="RangeFactor">Fraction of the bullet's full range at which the bot starts shooting.</param>
+public sealed record BotProfile(
+    float ThinkInterval, float AimNoise, float FireAngle, float MaxSpeed, float ShieldSkill, float Standoff, float Gain,
+    float LeadSkill, float ShotInterval, float RangeFactor)
 {
     public static BotProfile For(BotDifficulty difficulty) => difficulty switch
     {
-        BotDifficulty.Easy => new(0.25f, 0.16f, 0.12f, 260f, 0.25f, 280f, 2.5f),
-        BotDifficulty.Hard => new(0.05f, 0.02f, 0.05f, 520f, 0.9f, 220f, 3.5f),
-        _ => new(0.12f, 0.07f, 0.08f, 380f, 0.55f, 250f, 3f),
+        BotDifficulty.Easy => new(0.3f, 0.4f, 0.25f, 260f, 0.25f, 300f, 2.5f, 0.25f, 1.2f, 0.5f),
+        BotDifficulty.Hard => new(0.08f, 0.1f, 0.08f, 520f, 0.85f, 220f, 3.5f, 0.8f, 0.3f, 0.8f),
+        _ => new(0.15f, 0.2f, 0.12f, 380f, 0.55f, 250f, 3f, 0.6f, 0.8f, 0.7f),
     };
 }
 
@@ -52,8 +57,14 @@ public sealed class BotController
     private Vector2 _aimDir;
 
     private float _shieldTimer;
+    private float _shotTimer;
     private float _thrustDuty;
     private bool _refueling;
+    private float _speedLimit;
+    /// <summary>Hold a standoff distance from a visible target instead of following the waypoint.</summary>
+    private bool _engage;
+    /// <summary>Press the grab key on the next tick.</summary>
+    private bool _grabPulse;
     private Vector2 _wanderGoal;
     private bool _hasWanderGoal;
 
@@ -70,6 +81,7 @@ public sealed class BotController
         _profile = BotProfile.For(difficulty);
         _rng = new Random(seed);
         _thinkTimer = (float)_rng.NextDouble() * _profile.ThinkInterval;
+        _speedLimit = _profile.MaxSpeed;
     }
 
     public Ship Ship { get; }
@@ -95,6 +107,7 @@ public sealed class BotController
         _thinkTimer -= dt;
         _fieldAge += dt;
         _shieldTimer -= dt;
+        _shotTimer -= dt;
         if (_thinkTimer <= 0f)
         {
             Think();
@@ -106,13 +119,27 @@ public sealed class BotController
             float heading = _hasWaypoint ? MathUtil.ToAngle(_world.Map.Delta(s.Position, _waypoint)) : s.Heading;
             return new ShipInput { Turn = TurnToward(heading) };
         }
-        return Steer();
+
+        var input = Steer();
+        if (_grabPulse)
+        {
+            // One tick only: the world reacts to the press, and a held key would not grab again.
+            input.Grab = !s.GrabHeld;
+            _grabPulse = false;
+        }
+        return input;
     }
 
     private void Think()
     {
-        if (_world.Rules.Mode == GameModeKind.Race) ThinkRace();
-        else ThinkDogfight();
+        _speedLimit = _profile.MaxSpeed;
+        _engage = false;
+        switch (_world.Rules.Mode)
+        {
+            case GameModeKind.Race: ThinkRace(); break;
+            case GameModeKind.Ball: ThinkBall(); break;
+            default: ThinkDogfight(); break;
+        }
         if (_world.Rules.WeaponsEnabled) ThinkShield();
     }
 
@@ -161,54 +188,180 @@ public sealed class BotController
 
     private void ThinkDogfight()
     {
+        UpdateRefueling();
+        _target = PickTarget(out _targetVisible);
+        AimAtTarget();
+        _engage = true;
+
+        if (_refueling) NavigateTo(Nearest(_world.Map.FuelStations), true);
+        else if (_target != null) NavigateTo(_target.Position, false);
+        else NavigateTo(WanderGoal(), true);
+    }
+
+    /// <summary>
+    /// Ball mode. In priority order: tow a carried ball home, refuel, return our dropped ball, chase whoever
+    /// has our ball, then either attack (fetch the enemy ball, escort a teammate carrying it) or defend.
+    /// </summary>
+    private void ThinkBall()
+    {
         var s = Ship;
         var map = _world.Map;
         var cfg = _world.Config;
+        var home = map.TreasureOf(s.Team) ?? s.Position;
+        Ball? ownBall = null, enemyBall = null;
+        foreach (var b in _world.Balls)
+        {
+            if (b.Team == s.Team) ownBall = b;
+            else enemyBall = b;
+        }
+        var towing = _world.CarriedBy(s);
+
+        if (towing == null) UpdateRefueling();
+        else _refueling = false;
+        _target = PickTarget(out _targetVisible);
+        AimAtTarget();
+
+        if (towing != null)
+        {
+            // Fly past the treasure so the ball trailing behind is dragged across it.
+            _speedLimit = _profile.MaxSpeed * 0.6f;
+            var goal = home;
+            if (map.Distance(s.Position, home) < 140f)
+            {
+                var beyond = home + MathUtil.SafeNormalize(map.Delta(towing.Position, home)) * 60f;
+                if (!map.CircleOverlapsWall(beyond, cfg.ShipRadius + 4f)) goal = beyond;
+            }
+            NavigateTo(goal, true);
+            return;
+        }
 
         if (_refueling)
         {
-            if (s.Fuel > cfg.MaxFuel * 0.9f || map.FuelStations.Count == 0) _refueling = false;
+            NavigateTo(Nearest(map.FuelStations), true);
+            return;
         }
-        else if (s.Fuel < cfg.MaxFuel * 0.3f && map.FuelStations.Count > 0)
+
+        if (ownBall is { State: BallState.Loose } && IsClosestBotTeammate(ownBall.Position))
+        {
+            NavigateTo(ownBall.Position, false);
+            return;
+        }
+
+        if (ownBall is { State: BallState.Carried } && _world.GetShip(ownBall.CarrierId) is { Alive: true } thief)
+        {
+            _target = thief;
+            _targetVisible = map.Distance(s.Position, thief.Position) < 900f && map.SegmentClear(s.Position, thief.Position, 0f);
+            AimAtTarget();
+            _engage = _targetVisible;
+            NavigateTo(thief.Position, false);
+            return;
+        }
+
+        if (IsAttacker() && enemyBall != null)
+        {
+            if (enemyBall.State != BallState.Carried)
+            {
+                float dist = map.Distance(s.Position, enemyBall.Position);
+                if (dist < cfg.GrabRange * 0.8f) _grabPulse = true;
+                NavigateTo(enemyBall.Position, true);
+                return;
+            }
+            if (_world.GetShip(enemyBall.CarrierId) is { Alive: true } carrier && carrier.Team == s.Team)
+            {
+                // Escort the teammate who has the enemy ball, fighting anyone nearby.
+                _engage = _targetVisible && map.Distance(s.Position, _target!.Position) < 500f;
+                NavigateTo(carrier.Position, false);
+                return;
+            }
+        }
+
+        // Defend: guard a spot in front of our treasure and engage enemies who come close.
+        if (_target != null && _targetVisible && map.Distance(_target.Position, home) < 700f)
+        {
+            _engage = true;
+            NavigateTo(_target.Position, false);
+            return;
+        }
+        NavigateTo(GuardPoint(home), true);
+    }
+
+    private Vector2 GuardPoint(Vector2 home)
+    {
+        var map = _world.Map;
+        var center = new Vector2(map.PixelWidth / 2f, map.PixelHeight / 2f);
+        var guard = home + MathUtil.SafeNormalize(map.Delta(home, center)) * 110f;
+        return map.CircleOverlapsWall(guard, _world.Config.ShipRadius + 8f) ? home : guard;
+    }
+
+    /// <summary>Half the bots on each team (by id) go for the enemy ball; the rest defend.</summary>
+    private bool IsAttacker()
+    {
+        int index = 0, count = 0;
+        foreach (var other in _world.Ships)
+        {
+            if (!other.IsBot || other.Team != Ship.Team) continue;
+            if (other == Ship) index = count;
+            count++;
+        }
+        return count == 1 || index % 2 == 0;
+    }
+
+    private bool IsClosestBotTeammate(Vector2 point)
+    {
+        var map = _world.Map;
+        float mine = map.Distance(Ship.Position, point);
+        foreach (var other in _world.Ships)
+        {
+            if (other == Ship || !other.IsBot || !other.Alive || other.Team != Ship.Team) continue;
+            if (map.Distance(other.Position, point) < mine) return false;
+        }
+        return true;
+    }
+
+    private void UpdateRefueling()
+    {
+        var map = _world.Map;
+        var cfg = _world.Config;
+        if (_refueling)
+        {
+            if (Ship.Fuel > cfg.MaxFuel * 0.9f || map.FuelStations.Count == 0) _refueling = false;
+        }
+        else if (Ship.Fuel < cfg.MaxFuel * 0.3f && map.FuelStations.Count > 0)
         {
             _refueling = true;
         }
+    }
 
-        _target = PickTarget(out _targetVisible);
+    private void AimAtTarget()
+    {
+        var cfg = _world.Config;
         _hasShot = false;
         if (_target != null && _targetVisible
-            && map.Distance(s.Position, _target.Position) < cfg.BulletSpeed * cfg.BulletLife * 0.85f
+            && _world.Map.Distance(Ship.Position, _target.Position) < cfg.BulletSpeed * cfg.BulletLife * _profile.RangeFactor
             && TryIntercept(_target, out var aim))
         {
             float noise = ((float)_rng.NextDouble() * 2f - 1f) * _profile.AimNoise;
             _aimDir = MathUtil.Rotate(aim, noise);
             _hasShot = true;
         }
+    }
 
-        Vector2 goal;
-        bool final;
-        if (_refueling)
+    private Vector2 WanderGoal()
+    {
+        if (!_hasWanderGoal || _world.Map.Distance(Ship.Position, _wanderGoal) < 64f)
         {
-            goal = Nearest(map.FuelStations);
-            final = true;
+            _wanderGoal = _nav.RandomOpenPosition(_rng);
+            _hasWanderGoal = true;
         }
-        else if (_target != null)
-        {
-            goal = _target.Position;
-            final = false;
-        }
-        else
-        {
-            if (!_hasWanderGoal || map.Distance(s.Position, _wanderGoal) < 64f)
-            {
-                _wanderGoal = _nav.RandomOpenPosition(_rng);
-                _hasWanderGoal = true;
-            }
-            goal = _wanderGoal;
-            final = true;
-        }
+        return _wanderGoal;
+    }
 
-        float r = cfg.ShipRadius;
+    /// <summary>Sets the waypoint: straight to the goal if visible, otherwise along the flow field.</summary>
+    private void NavigateTo(Vector2 goal, bool final)
+    {
+        var s = Ship;
+        var map = _world.Map;
+        float r = _world.Config.ShipRadius;
         if (map.SegmentClear(s.Position, goal, r))
         {
             SetWaypoint(s.Position + map.Delta(s.Position, goal), final);
@@ -255,6 +408,7 @@ public sealed class BotController
         foreach (var other in _world.Ships)
         {
             if (other == s || !other.Alive) continue;
+            if (s.Team != Teams.None && other.Team == s.Team) continue;
             float dist = map.Distance(s.Position, other.Position);
             bool canSee = dist < 900f && map.SegmentClear(s.Position, other.Position, 0f);
             float score = dist * (canSee ? 0.6f : 1f) + (other.SpawnProtection > 0f ? 300f : 0f);
@@ -275,7 +429,8 @@ public sealed class BotController
         var cfg = _world.Config;
         aim = Vector2.Zero;
         var p = _world.Map.Delta(s.Position, target.Position);
-        var w = target.Velocity - s.Velocity;
+        // Bullets inherit our velocity exactly, but weaker bots only partly anticipate the target's movement.
+        var w = target.Velocity * _profile.LeadSkill - s.Velocity;
         float speed = cfg.BulletSpeed;
         float a = Vector2.Dot(w, w) - speed * speed;
         float b = 2f * Vector2.Dot(p, w);
@@ -331,20 +486,20 @@ public sealed class BotController
 
         // Desired velocity: follow the waypoint, or keep a standoff from a visible target.
         Vector2 desiredVelocity = Vector2.Zero;
-        if (_world.Rules.Mode == GameModeKind.Dogfight && _targetVisible && !_refueling && _target is { Alive: true } target)
+        if (_engage && _targetVisible && !_refueling && _target is { Alive: true } target)
         {
             var toTarget = map.Delta(s.Position, target.Position);
             float dist = toTarget.Length();
-            float approach = Math.Clamp((dist - _profile.Standoff) * 0.8f, -150f, _profile.MaxSpeed);
+            float approach = Math.Clamp((dist - _profile.Standoff) * 0.8f, -150f, _speedLimit);
             desiredVelocity = target.Velocity * 0.5f + MathUtil.SafeNormalize(toTarget) * approach;
-            desiredVelocity = MathUtil.ClampLength(desiredVelocity, _profile.MaxSpeed);
+            desiredVelocity = MathUtil.ClampLength(desiredVelocity, _speedLimit);
         }
         else if (_hasWaypoint)
         {
             var toWaypoint = map.Delta(s.Position, _waypoint);
             float dist = toWaypoint.Length();
             float speed = _waypointIsFinal ? BrakeSpeed(MathF.Max(0f, dist - 8f)) : BrakeSpeed(dist + 64f);
-            speed = MathF.Min(speed, _profile.MaxSpeed);
+            speed = MathF.Min(speed, _speedLimit);
             if (_waypointIsFinal && dist < 16f) speed = 0f;
             desiredVelocity = MathUtil.SafeNormalize(toWaypoint) * speed;
         }
@@ -405,7 +560,11 @@ public sealed class BotController
         if (_hasShot && !shield && _target is { Alive: true })
         {
             float aimError = MathF.Abs(MathUtil.WrapAngle(s.Heading - MathUtil.ToAngle(_aimDir)));
-            input.Fire = aimError < _profile.FireAngle;
+            if (aimError < _profile.FireAngle && _shotTimer <= 0f)
+            {
+                input.Fire = true;
+                _shotTimer = _profile.ShotInterval * (0.6f + 0.8f * (float)_rng.NextDouble());
+            }
         }
         return input;
     }

@@ -48,6 +48,11 @@ public sealed class PlayScreen : Screen
         {
             _hud.ShowCenter("DOGFIGHT", Palette.Accent, 2.5f, $"FIRST TO {dogfight.ScoreLimit} KILLS WINS");
         }
+        else if (_match.World.Rules is BallRules ball && _match.Player is { } player)
+        {
+            _hud.ShowCenter($"{Teams.Name(player.Team).ToUpperInvariant()} TEAM", Palette.Team(player.Team), 3.5f,
+                $"{_bindings.Describe(GameAction.Grab)} GRABS THE ENEMY BALL - FIRST TO {ball.CaptureLimit}");
+        }
         HandleEvents();
     }
 
@@ -187,20 +192,20 @@ public sealed class PlayScreen : Screen
                     break;
 
                 case GameEventType.ShipDestroyed when ship != null:
-                    Explode(pos, e.Velocity.ToXna(), Palette.Ship(ship.ColorIndex));
+                    Explode(pos, e.Velocity.ToXna(), Palette.Ship(ship));
                     Sounds.Play("explosion", MathF.Max(volume, isPlayer ? 1f : 0f), (float)_rng.NextDouble() * 0.2f - 0.1f, pan);
-                    _hud.AddFeed(DeathMessage(ship, other, e.Cause), other != null && other != ship ? Palette.Ship(other.ColorIndex) : Palette.TextDim);
+                    _hud.AddFeed(DeathMessage(ship, other, e.Cause), other != null && other != ship ? Palette.Ship(other) : Palette.TextDim);
                     if (isPlayer)
                     {
                         _shake = 12f;
-                        if (world.Rules.Mode == GameModeKind.Dogfight)
+                        if (world.Rules.Mode != GameModeKind.Race)
                         {
                             _hud.ShowCenter("DESTROYED", Palette.Warning, 1.6f, other != null && other != ship ? $"BY {other.Name.ToUpperInvariant()}" : null);
                         }
                     }
                     else if (other != null && other == player)
                     {
-                        _hud.ShowCenter("KILL", Palette.Ship(ship.ColorIndex), 0.8f, ship.Name.ToUpperInvariant());
+                        _hud.ShowCenter("KILL", Palette.Ship(ship), 0.8f, ship.Name.ToUpperInvariant());
                     }
                     break;
 
@@ -234,7 +239,7 @@ public sealed class PlayScreen : Screen
                     break;
 
                 case GameEventType.ShipFinished when ship != null:
-                    _hud.AddFeed($"{ship.Name} FINISHED #{ship.Place}", Palette.Ship(ship.ColorIndex));
+                    _hud.AddFeed($"{ship.Name} FINISHED #{ship.Place}", Palette.Ship(ship));
                     if (isPlayer)
                     {
                         Sounds.Play("lap", 1f);
@@ -253,11 +258,61 @@ public sealed class PlayScreen : Screen
                     _hud.ShowCenter("GO!", Palette.Fuel, 1f);
                     break;
 
+                case GameEventType.BallGrabbed when ship != null:
+                {
+                    int ballTeam = (int)e.Value;
+                    _hud.AddFeed($"{ship.Name} GRABBED THE {Teams.Name(ballTeam)} BALL", Palette.Ship(ship));
+                    if (isPlayer)
+                    {
+                        Sounds.Play("spawn", 0.7f);
+                        _hud.ShowCenter("GOT IT!", Palette.Team(ballTeam), 1.5f, "TOW IT TO YOUR TREASURE");
+                    }
+                    else if (player != null && ballTeam == player.Team)
+                    {
+                        Sounds.Play("beep", 0.8f, 0.5f);
+                        _hud.ShowCenter("BALL TAKEN!", Palette.Warning, 1.5f, $"{ship.Name.ToUpperInvariant()} HAS YOUR BALL");
+                    }
+                    break;
+                }
+
+                case GameEventType.BallDropped:
+                    _particles.Burst(pos, Vector2.Zero, 16, 40f, 160f, Palette.Team((int)e.Value), 0.3f, 0.7f);
+                    break;
+
+                case GameEventType.BallCaptured when ship != null:
+                {
+                    var color = Palette.Team(ship.Team);
+                    _particles.Burst(pos, Vector2.Zero, 120, 80f, 420f, color, 0.6f, 1.6f, 2f);
+                    _particles.Burst(pos, Vector2.Zero, 40, 40f, 200f, Color.White, 0.4f, 1.2f);
+                    Sounds.Play("lap", 1f);
+                    _shake = MathF.Max(_shake, 6f);
+                    _hud.AddFeed($"{ship.Name} CAPTURED THE {Teams.Name((int)e.Value)} BALL!", color);
+                    _hud.ShowCenter($"{Teams.Name(ship.Team).ToUpperInvariant()} SCORES!", color, 2.5f, $"CAPTURED BY {ship.Name.ToUpperInvariant()}");
+                    break;
+                }
+
+                case GameEventType.BallReturned:
+                {
+                    int ballTeam = (int)e.Value;
+                    _hud.AddFeed(ship != null ? $"{ship.Name} RETURNED THE {Teams.Name(ballTeam)} BALL" : $"{Teams.Name(ballTeam)} BALL RETURNED",
+                        Palette.Team(ballTeam));
+                    if (player != null && ballTeam == player.Team) Sounds.Play("checkpoint", 0.7f);
+                    break;
+                }
+
+                case GameEventType.MatchOver when world.Rules is BallRules ballRules:
+                {
+                    int team = ballRules.WinningTeam;
+                    string text = team == Teams.None ? "DRAW" : player?.Team == team ? "YOUR TEAM WINS!" : $"{Teams.Name(team).ToUpperInvariant()} TEAM WINS";
+                    _hud.ShowCenter(text, Palette.Team(team), 5f, "MATCH OVER");
+                    break;
+                }
+
                 case GameEventType.MatchOver:
                     var winner = world.Rules.GetStandings(world).FirstOrDefault();
                     if (world.Rules.Mode == GameModeKind.Dogfight && winner != null)
                     {
-                        _hud.ShowCenter(winner == player ? "YOU WIN!" : $"{winner.Name.ToUpperInvariant()} WINS", Palette.Ship(winner.ColorIndex), 5f, "MATCH OVER");
+                        _hud.ShowCenter(winner == player ? "YOU WIN!" : $"{winner.Name.ToUpperInvariant()} WINS", Palette.Ship(winner), 5f, "MATCH OVER");
                     }
                     else if (player is not { Finished: true })
                     {
