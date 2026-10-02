@@ -41,7 +41,7 @@ try
         string Next() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{args[i]} needs a value");
         switch (args[i].ToLowerInvariant())
         {
-            case "--name": options.Name = Protocol.CleanName(Next()); break;
+            case "--name": options.Name = Protocol.CleanServerName(Next()); break;
             case "--port": options.Port = int.Parse(Next()); break;
             case "--mode": mode = Next().ToLowerInvariant(); break;
             case "--map": mapNames.AddRange(Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)); break;
@@ -82,6 +82,13 @@ Console.CancelKeyPress += (_, e) =>
     e.Cancel = true;
     stop.Set();
 };
+// systemd and docker stop services with SIGTERM rather than Ctrl+C.
+using var sigterm = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+    System.Runtime.InteropServices.PosixSignal.SIGTERM, context =>
+    {
+        context.Cancel = true;
+        stop.Set();
+    });
 void Log(string line) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {line}");
 
 if (masterPort is { } port)

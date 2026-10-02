@@ -32,6 +32,16 @@ public static class Protocol
         return clean.Length == 0 ? "Pilot" : clean;
     }
 
+    public const int MaxServerNameLength = 40;
+
+    public static string CleanServerName(string? name)
+    {
+        var chars = (name ?? "").Where(c => c >= ' ' && c < 127).ToArray();
+        var clean = new string(chars).Trim();
+        if (clean.Length > MaxServerNameLength) clean = clean[..MaxServerNameLength].Trim();
+        return clean.Length == 0 ? "XPilot" : clean;
+    }
+
     public static string CleanChat(string? text)
     {
         var chars = (text ?? "").Where(c => c >= ' ' && c < 127).ToArray();

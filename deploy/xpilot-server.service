@@ -1,0 +1,54 @@
+# systemd unit for the XPilot game server.
+#
+# Installed to /etc/systemd/system/ by server-setup.sh. Settings (name, mode, bots, master server) live in
+# /etc/xpilot/server.env so they can change without touching this file.
+#
+# The release is self-contained, so the server needs no .NET installed. It shares the machine with other
+# services, so it runs as its own user, can't write anywhere, and is capped at half a CPU and 512 MB.
+
+[Unit]
+Description=XPilot game server
+Documentation=https://github.com/yngveerlandsen/XPilot
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=xpilot
+Group=xpilot
+WorkingDirectory=/opt/xpilot/current
+EnvironmentFile=/etc/xpilot/server.env
+# ${VAR} keeps a value with spaces as one argument; $XPILOT_EXTRA_ARGS is split into several on purpose.
+ExecStart=/opt/xpilot/current/XPilot.Server --name ${XPILOT_NAME} --port ${XPILOT_PORT} --mode ${XPILOT_MODE} --bots ${XPILOT_BOTS} --difficulty ${XPILOT_DIFFICULTY} --master ${XPILOT_MASTER} $XPILOT_EXTRA_ARGS
+Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+Environment=DOTNET_gcServer=0
+
+Restart=always
+RestartSec=5
+
+# Never get in the way of the other services on this machine.
+CPUQuota=50%
+MemoryMax=512M
+Nice=5
+
+# Hardening: it needs the network and nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=xpilot-server
+
+[Install]
+WantedBy=multi-user.target
