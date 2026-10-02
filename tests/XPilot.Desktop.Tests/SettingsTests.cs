@@ -59,6 +59,22 @@ public class SettingsTests
         Assert.Equal(0.5f, copy.ScreenShake);
     }
 
+    [Theory]
+    [InlineData(null, Settings.DefaultMasterServer)]
+    [InlineData("", null)]
+    [InlineData("  ", null)]
+    [InlineData(" example.com:2000 ", "example.com:2000")]
+    public void MasterServer_DefaultsToThePublicList_AndCanBeCleared(string? stored, string? effective) =>
+        Assert.Equal(effective, new Settings { MasterServer = stored }.EffectiveMasterServer);
+
+    [Fact]
+    public void OlderSettingsFiles_GetTheDefaultMasterServer_ButDontListHostedGames()
+    {
+        var settings = JsonSerializer.Deserialize<Settings>("""{ "MasterServer": null, "PlayerName": "Old" }""")!;
+        Assert.Equal(Settings.DefaultMasterServer, settings.EffectiveMasterServer);
+        Assert.False(settings.ListHostedGames);
+    }
+
     [Fact]
     public void MatchRuleDefaults_LeaveTheModeAndMapInCharge()
     {

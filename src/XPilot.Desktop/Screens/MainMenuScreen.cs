@@ -188,7 +188,7 @@ public sealed class MainMenuScreen : Screen
             Port = s.HostPort,
             BotCount = _bots,
             Difficulty = _difficulty,
-            MasterServer = s.MasterServer,
+            MasterServer = s.ListHostedGames ? s.EffectiveMasterServer : null,
             ScoreLimit = s.ScoreLimit,
             CaptureLimit = s.CaptureLimit,
             TimeLimit = s.TimeLimitSeconds,

@@ -16,6 +16,8 @@ public sealed class ServerOptions
     public float? TimeLimit { get; set; }
     public int? Laps { get; set; }
     public float IntermissionSeconds { get; set; } = Protocol.IntermissionSeconds;
+    /// <summary>Play the maps in random order (never the same one twice in a row) instead of in turn.</summary>
+    public bool ShuffleMaps { get; set; }
     /// <summary>"host:port" of a master server to register with, or null to stay off the internet list.</summary>
     public string? MasterServer { get; set; }
 }
@@ -63,7 +65,7 @@ public sealed class GameServer
         _options = options;
         _mapTexts = mapTexts.ToList();
         if (_mapTexts.Count == 0) throw new ArgumentException("The server needs at least one map.", nameof(mapTexts));
-        _mapIndex = Math.Clamp(firstMap, 0, _mapTexts.Count - 1);
+        _mapIndex = options.ShuffleMaps ? _rng.Next(_mapTexts.Count) : Math.Clamp(firstMap, 0, _mapTexts.Count - 1);
         Match = StartMatch();
     }
 
@@ -167,7 +169,7 @@ public sealed class GameServer
             _intermission -= GameConfig.Dt;
             if (_intermission <= 0f)
             {
-                _mapIndex = (_mapIndex + 1) % _mapTexts.Count;
+                _mapIndex = NextMapIndex();
                 Match = StartMatch();
             }
         }
@@ -192,6 +194,14 @@ public sealed class GameServer
         if (Match.World.Rules.IsOver && _intermission < 0f) _intermission = _options.IntermissionSeconds;
         SendRosterIfChanged();
         if (Match.World.Tick % Protocol.SnapshotInterval == 0) SendUpdates();
+    }
+
+    private int NextMapIndex()
+    {
+        int count = _mapTexts.Count;
+        if (!_options.ShuffleMaps || count < 2) return (_mapIndex + 1) % count;
+        int next = _rng.Next(count - 1);
+        return next >= _mapIndex ? next + 1 : next;
     }
 
     private Match StartMatch()

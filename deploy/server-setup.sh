@@ -36,8 +36,8 @@ if [[ ! -f "$CONFIG_DIR/server.env" ]]; then
 # Settings for xpilot-server and xpilot-master. Change, then: systemctl restart xpilot-server
 XPILOT_NAME=XPilot at $PUBLIC_HOST
 XPILOT_PORT=$GAME_PORT
-# dogfight, race or ball: the server goes through every map of that mode.
-XPILOT_MODE=dogfight
+# dogfight, race or ball: every map of that mode in turn. random: every map of every mode, shuffled.
+XPILOT_MODE=random
 XPILOT_BOTS=4
 XPILOT_DIFFICULTY=normal
 # The game server lists itself here. Use the public name, not localhost, so the master records the

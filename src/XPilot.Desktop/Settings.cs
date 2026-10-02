@@ -53,8 +53,24 @@ public sealed class Settings
     public string LastAddress { get; set; } = "";
     /// <summary>UDP port for hosting a game.</summary>
     public int HostPort { get; set; } = Net.Protocol.DefaultPort;
-    /// <summary>"host:port" of a master server for the internet server list, or null for LAN only.</summary>
+    public const string DefaultMasterServer = "xpilot.hjemmelaga.online";
+
+    /// <summary>
+    /// "host[:port]" of the master server for the internet game list. Null (also what older settings files
+    /// have) means <see cref="DefaultMasterServer"/>; an empty string means LAN only.
+    /// </summary>
     public string? MasterServer { get; set; }
+
+    /// <summary>Announce games hosted from the menu on the internet list. Off by default: it shows the host's address.</summary>
+    public bool ListHostedGames { get; set; }
+
+    [JsonIgnore]
+    public string? EffectiveMasterServer => MasterServer switch
+    {
+        null => DefaultMasterServer,
+        var m when string.IsNullOrWhiteSpace(m) => null,
+        var m => m.Trim(),
+    };
 
     public static string FilePath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XPilot", "settings.json");

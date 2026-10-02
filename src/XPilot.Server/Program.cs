@@ -14,7 +14,9 @@ const string Usage = """
     Options:
       --name <text>          Server name shown in server lists (default "XPilot")
       --port <n>             UDP port (default 15345)
-      --mode <mode>          dogfight, race or ball: rotate through every map of that mode (default dogfight)
+      --mode <mode>          dogfight, race or ball: rotate through every map of that mode (default dogfight).
+                             random: every map of every mode, in random order
+      --shuffle              Play the maps in random order instead of in turn
       --map <name>           Play only these maps, in order (repeat or comma-separate). Overrides --mode.
       --maps <dir>           Folder with .xpm maps (default: "maps" next to the server)
       --bots <n>             Bots filling free seats (default 3)
@@ -46,6 +48,7 @@ try
             case "--mode": mode = Next().ToLowerInvariant(); break;
             case "--map": mapNames.AddRange(Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)); break;
             case "--maps": mapsDir = Next(); break;
+            case "--shuffle": options.ShuffleMaps = true; break;
             case "--bots": options.BotCount = int.Parse(Next()); break;
             case "--difficulty": options.Difficulty = Enum.Parse<BotDifficulty>(Next(), true); break;
             case "--score-limit": options.ScoreLimit = int.Parse(Next()); break;
@@ -141,15 +144,23 @@ if (mapNames.Count > 0)
 }
 else
 {
-    if (!Enum.TryParse<GameModeKind>(mode, true, out var kind))
+    if (mode is "random" or "all")
     {
-        Console.Error.WriteLine($"Unknown mode '{mode}'. Use dogfight, race or ball.");
+        rotation = available.Select(m => m.File).ToList();
+        options.ShuffleMaps = true;
+    }
+    else if (!Enum.TryParse<GameModeKind>(mode, true, out var kind))
+    {
+        Console.Error.WriteLine($"Unknown mode '{mode}'. Use dogfight, race, ball or random.");
         return 1;
     }
-    rotation = available.Where(m => m.Map.Mode == kind).Select(m => m.File).ToList();
+    else
+    {
+        rotation = available.Where(m => m.Map.Mode == kind).Select(m => m.File).ToList();
+    }
     if (rotation.Count == 0)
     {
-        Console.Error.WriteLine($"No {kind} maps in {mapsDir}.");
+        Console.Error.WriteLine($"No {mode} maps in {mapsDir}.");
         return 1;
     }
 }

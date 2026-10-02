@@ -85,7 +85,9 @@ Releases include ready-built servers for Windows and Linux (`XPilot-Server-*.zip
 
 `XPilot.Server --run-master` runs a master server (UDP 15346), like the original XPilot meta-server. It
 must run somewhere reachable from the internet. Game servers started with `--master host:port` register
-with it. Players who set the master server under *Settings > Network* see those servers in the join
+with it. The game's default master server is `xpilot.hjemmelaga.online`; change or clear it under *Settings > Network*.
+Games you host from the menu are only listed there if you turn on *List my hosted games*, since that shows
+your address to everyone. Players using a master server see its servers in the join
 list. Joining goes through NAT punch-through, so a host behind a typical home router usually doesn't need to
 forward a port. The master only lists servers and introduces players; game traffic goes directly between
 players and the server.
