@@ -152,6 +152,22 @@ public sealed class BallRules(int captureLimit = 3, float timeLimit = 600f) : IG
         .ThenBy(s => s.Id)
         .ToList();
 
+    public void WriteState(BinaryWriter writer)
+    {
+        writer.Write(IsOver);
+        writer.Write((sbyte)WinningTeam);
+        writer.Write(_teamScores[Teams.Red]);
+        writer.Write(_teamScores[Teams.Blue]);
+    }
+
+    public void ReadState(BinaryReader reader)
+    {
+        IsOver = reader.ReadBoolean();
+        WinningTeam = reader.ReadSByte();
+        _teamScores[Teams.Red] = reader.ReadInt32();
+        _teamScores[Teams.Blue] = reader.ReadInt32();
+    }
+
     private void End(World world)
     {
         IsOver = true;

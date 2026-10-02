@@ -22,13 +22,40 @@ public static class MapLoader
 {
     public static Map Load(string path)
     {
-        var map = Parse(File.ReadAllText(path), Path.GetFileNameWithoutExtension(path));
+        var map = Parse(ReadText(path), Path.GetFileNameWithoutExtension(path));
         map.SourcePath = path;
         return map;
     }
 
+    private static readonly System.Text.Encoding StrictUtf8 = new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true);
+
+    /// <summary>A map file's text. Original XPilot maps are Latin-1, so text that isn't valid UTF-8 is read as that.</summary>
+    public static string ReadText(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        try
+        {
+            return StrictUtf8.GetString(bytes);
+        }
+        catch (System.Text.DecoderFallbackException)
+        {
+            return System.Text.Encoding.Latin1.GetString(bytes);
+        }
+    }
+
+    /// <summary>File extensions the loader understands: this game's own format and original XPilot maps.</summary>
+    public static readonly string[] Extensions = [".xpm", ".xp"];
+
+    /// <summary>Every map file in a folder and its subfolders.</summary>
+    public static IEnumerable<string> FindMaps(string directory) =>
+        Directory.EnumerateFiles(directory, "*.*", SearchOption.AllDirectories)
+            .Where(f => Extensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
+            .Order();
+
+    /// <summary>Parses either format; original XPilot maps are recognized by their "mapData" block.</summary>
     public static Map Parse(string text, string fallbackName = "Unnamed")
     {
+        if (XpMapImporter.IsXpFormat(text)) return XpMapImporter.Parse(text, fallbackName);
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         int separator = Array.FindIndex(lines, l => l.Trim() == "---");
         var header = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

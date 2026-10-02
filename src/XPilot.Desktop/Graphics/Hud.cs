@@ -11,10 +11,12 @@ namespace XPilot.Desktop.Graphics;
 public sealed class Hud
 {
     private const float FeedLifetime = 6f;
+    private const float ChatLifetime = 12f;
 
     private readonly Map _map;
     private readonly List<(RectangleF Rect, bool Diagonal)> _radarWalls = [];
     private readonly List<(string Text, Color Color, float Age)> _feed = [];
+    private readonly List<(string Text, Color Color, float Age)> _chat = [];
     private string? _centerText;
     private string? _centerSubtext;
     private Color _centerColor;
@@ -41,6 +43,17 @@ public sealed class Hud
         }
     }
 
+    /// <summary>The chat line being typed, or null when not typing.</summary>
+    public string? ChatInput { get; set; }
+    /// <summary>A small line above the speed readout, e.g. ping in network games.</summary>
+    public string? StatusText { get; set; }
+
+    public void AddChat(string text, Color color)
+    {
+        _chat.Add((text, color, 0f));
+        if (_chat.Count > 6) _chat.RemoveAt(0);
+    }
+
     public void AddFeed(string text, Color color)
     {
         _feed.Add((text, color, 0f));
@@ -65,10 +78,17 @@ public sealed class Hud
             if (f.Age > FeedLifetime) _feed.RemoveAt(i);
             else _feed[i] = f;
         }
+        for (int i = _chat.Count - 1; i >= 0; i--)
+        {
+            var c = _chat[i];
+            c.Age += dt;
+            if (c.Age > ChatLifetime) _chat.RemoveAt(i);
+            else _chat[i] = c;
+        }
         if (_centerTimer > 0f) _centerTimer -= dt;
     }
 
-    public void Draw(PrimitiveBatch pb, Viewport vp, Match match, bool showScoreboard, float time)
+    public void Draw(PrimitiveBatch pb, Viewport vp, IMatchView match, bool showScoreboard, float time)
     {
         float s = vp.Height / 720f;
         var world = match.World;
@@ -91,6 +111,7 @@ public sealed class Hud
 
         if (player != null) DrawShipStatus(pb, vp, s, world, player, time);
         DrawCenterMessage(pb, vp, s);
+        DrawChat(pb, vp, s, time);
         pb.End();
 
         if (showScoreboard) DrawScoreboard(pb, vp, s, match);
@@ -121,7 +142,7 @@ public sealed class Hud
         }
     }
 
-    private void DrawRadarObjects(PrimitiveBatch pb, RectangleF radar, Match match, float time)
+    private void DrawRadarObjects(PrimitiveBatch pb, RectangleF radar, IMatchView match, float time)
     {
         var (scale, origin) = RadarTransform(radar);
         Vector2 ToRadar(System.Numerics.Vector2 p) => origin + p.ToXna() / Map.TileSize * scale;
@@ -176,7 +197,7 @@ public sealed class Hud
         }
     }
 
-    private static void DrawBallInfo(PrimitiveBatch pb, Viewport vp, float s, Match match, BallRules rules, float time)
+    private static void DrawBallInfo(PrimitiveBatch pb, Viewport vp, float s, IMatchView match, BallRules rules, float time)
     {
         var world = match.World;
         var player = match.Player;
@@ -190,7 +211,7 @@ public sealed class Hud
         VectorFont.Draw(pb, blue, new Vector2(cx + 14 * s, 16 * s), size, Palette.BlueTeam);
 
         string clock = rules.TimeLimit > 0 ? FormatClock(rules.TimeRemaining(world)) + "   " : "";
-        VectorFont.Draw(pb, $"{clock}FIRST TO {rules.CaptureLimit}", new Vector2(cx, 46 * s), 10f * s, Palette.TextDim, TextAlign.Center);
+        VectorFont.Draw(pb, rules.CaptureLimit > 0 ? $"{clock}FIRST TO {rules.CaptureLimit}" : clock.TrimEnd(), new Vector2(cx, 46 * s), 10f * s, Palette.TextDim, TextAlign.Center);
 
         if (player == null) return;
         var teamColor = Palette.Team(player.Team);
@@ -216,7 +237,7 @@ public sealed class Hud
         }
     }
 
-    private static void DrawDogfightInfo(PrimitiveBatch pb, Viewport vp, float s, Match match, DogfightRules rules)
+    private static void DrawDogfightInfo(PrimitiveBatch pb, Viewport vp, float s, IMatchView match, DogfightRules rules)
     {
         var player = match.Player;
         if (player != null)
@@ -225,7 +246,7 @@ public sealed class Hud
             VectorFont.Draw(pb, $"KILLS {player.Kills}   DEATHS {player.Deaths}", new Vector2(16 * s, 48 * s), 11f * s, Palette.TextDim);
             var standings = rules.GetStandings(match.World);
             int rank = standings.ToList().IndexOf(player) + 1;
-            VectorFont.Draw(pb, $"RANK {rank}/{standings.Count}   FIRST TO {rules.ScoreLimit}", new Vector2(16 * s, 68 * s), 11f * s, Palette.TextDim);
+            VectorFont.Draw(pb, $"RANK {rank}/{standings.Count}" + (rules.ScoreLimit > 0 ? $"   FIRST TO {rules.ScoreLimit}" : ""), new Vector2(16 * s, 68 * s), 11f * s, Palette.TextDim);
         }
 
         if (rules.TimeLimit > 0)
@@ -236,7 +257,7 @@ public sealed class Hud
         }
     }
 
-    private static void DrawRaceInfo(PrimitiveBatch pb, Viewport vp, float s, Match match, RaceRules rules)
+    private static void DrawRaceInfo(PrimitiveBatch pb, Viewport vp, float s, IMatchView match, RaceRules rules)
     {
         var world = match.World;
         var player = match.Player;
@@ -297,6 +318,30 @@ public sealed class Hud
         VectorFont.Draw(pb, $"SPEED {speed:0}", new Vector2(vp.Width - 16 * s, vp.Height - 30 * s), 11f * s, Palette.TextDim, TextAlign.Right);
     }
 
+    private void DrawChat(PrimitiveBatch pb, Viewport vp, float s, float time)
+    {
+        if (StatusText != null)
+        {
+            VectorFont.Draw(pb, StatusText, new Vector2(vp.Width - 16 * s, vp.Height - 52 * s), 9f * s, Palette.TextDim * 0.8f, TextAlign.Right);
+        }
+
+        float x = 16 * s, y = vp.Height - 110 * s;
+        if (ChatInput != null)
+        {
+            string cursor = ((int)(time * 3f) & 1) == 0 ? "_" : " ";
+            VectorFont.Draw(pb, $"SAY: {ChatInput}{cursor}", new Vector2(x, y), 11f * s, Palette.Text);
+        }
+        y -= 22 * s;
+        for (int i = _chat.Count - 1; i >= 0; i--)
+        {
+            var (text, color, age) = _chat[i];
+            float fade = Math.Clamp((ChatLifetime - age) / 2f, 0f, 1f);
+            if (ChatInput != null) fade = 1f;
+            VectorFont.Draw(pb, text, new Vector2(x, y), 10f * s, color * fade);
+            y -= 18 * s;
+        }
+    }
+
     private void DrawCenterMessage(PrimitiveBatch pb, Viewport vp, float s)
     {
         if (_centerTimer <= 0f || _centerText == null) return;
@@ -309,7 +354,7 @@ public sealed class Hud
         }
     }
 
-    public static void DrawScoreboard(PrimitiveBatch pb, Viewport vp, float s, Match match)
+    public static void DrawScoreboard(PrimitiveBatch pb, Viewport vp, float s, IMatchView match)
     {
         var world = match.World;
         var standings = world.Rules.GetStandings(world);

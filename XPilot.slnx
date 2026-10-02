@@ -2,8 +2,12 @@
   <Folder Name="/src/">
     <Project Path="src/XPilot.Core/XPilot.Core.csproj" />
     <Project Path="src/XPilot.Desktop/XPilot.Desktop.csproj" />
+    <Project Path="src/XPilot.Net/XPilot.Net.csproj" />
+    <Project Path="src/XPilot.Server/XPilot.Server.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/XPilot.Core.Tests/XPilot.Core.Tests.csproj" />
+    <Project Path="tests/XPilot.Net.Tests/XPilot.Net.Tests.csproj" />
+    <Project Path="tests/XPilot.Desktop.Tests/XPilot.Desktop.Tests.csproj" />
   </Folder>
 </Solution>

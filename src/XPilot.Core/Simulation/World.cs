@@ -11,6 +11,9 @@ namespace XPilot.Core.Simulation;
 public sealed class World(Map map, GameConfig config, IGameRules rules, int seed = 0)
 {
     private readonly List<GameEvent> _events = [];
+    private readonly Dictionary<int, Ship> _shipsById = [];
+    private int _nextShipId;
+    private int _nextBulletId;
 
     public Map Map { get; } = map;
     public GameConfig Config { get; } = config;
@@ -25,14 +28,39 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
     public float Time { get; private set; }
     public int Tick { get; private set; }
 
-    public Ship AddShip(string name, bool isBot)
+    public Ship AddShip(string name, bool isBot) => AddShip(_nextShipId, name, isBot);
+
+    /// <summary>Adds a ship with a chosen id, e.g. to mirror a server's world. Ids must be unique.</summary>
+    public Ship AddShip(int id, string name, bool isBot)
     {
-        var ship = new Ship(Ships.Count, name, isBot, Ships.Count);
+        var ship = new Ship(id, name, isBot, id);
+        _shipsById.Add(id, ship);
         Ships.Add(ship);
+        _nextShipId = Math.Max(_nextShipId, id + 1);
         return ship;
     }
 
-    public Ship? GetShip(int id) => id >= 0 && id < Ships.Count ? Ships[id] : null;
+    /// <summary>
+    /// Takes a ship out of the game, dropping any ball it tows and removing its bullets (team and kill credit
+    /// need a living owner). Ids are never reused.
+    /// </summary>
+    public void RemoveShip(Ship ship)
+    {
+        if (!_shipsById.Remove(ship.Id)) return;
+        if (CarriedBy(ship) is { } ball) DropBall(ball);
+        Bullets.RemoveAll(b => b.OwnerId == ship.Id);
+        ship.Alive = false;
+        Ships.Remove(ship);
+    }
+
+    public Ship? GetShip(int id) => _shipsById.GetValueOrDefault(id);
+
+    /// <summary>Sets the clock directly, for a client mirroring a server's world.</summary>
+    public void SetTick(int tick)
+    {
+        Tick = tick;
+        Time = tick * GameConfig.Dt;
+    }
 
     public void Emit(GameEvent e) => _events.Add(e);
 
@@ -42,7 +70,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         Rules.Initialize(this);
     }
 
-    /// <param name="inputs">One input per ship, indexed by ship id. Missing entries mean "no input".</param>
+    /// <param name="inputs">One input per ship, in the order of <see cref="Ships"/>. Missing entries mean "no input".</param>
     public void Step(ReadOnlySpan<ShipInput> inputs)
     {
         _events.Clear();
@@ -135,9 +163,19 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         Rules.OnShipDestroyed(this, victim, killer, cause);
     }
 
+    /// <summary>Takes a ship off the field without counting a death, e.g. when it changes team.</summary>
+    public void Despawn(Ship s, float respawnDelay)
+    {
+        if (CarriedBy(s) is { } ball) DropBall(ball);
+        s.Alive = false;
+        s.Shield = false;
+        s.Thrusting = false;
+        s.Refueling = false;
+        s.RespawnTimer = respawnDelay;
+    }
+
     private void UpdateShip(Ship s, ShipInput input, float dt, bool locked)
     {
-        var cfg = Config;
         if (!s.Alive)
         {
             s.GrabHeld = false;
@@ -146,13 +184,65 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
             return;
         }
 
+        if (!MoveShip(s, input, dt, locked, predicting: false)) return;
+
+        if (CanFire(s, input)) FireBullet(s);
+
+        bool grabPressed = input.Grab && !s.GrabHeld;
+        s.GrabHeld = input.Grab;
+        if (grabPressed && Balls.Count > 0) ToggleGrab(s);
+    }
+
+    /// <summary>
+    /// Advances one ship (and the ball it tows) by a tick on its own, for client-side prediction. Firing only
+    /// uses up fuel and starts the cooldown, and crashes bounce instead of killing; the server decides those.
+    /// </summary>
+    /// <returns>Whether the ship would have fired.</returns>
+    public bool PredictShip(Ship s, ShipInput input, Ball? towed)
+    {
+        const float dt = GameConfig.Dt;
+        if (!s.Alive) return false;
+        s.PrevPosition = s.Position;
+        s.PrevHeading = s.Heading;
+        if (towed != null) towed.PrevPosition = towed.Position;
+
+        bool fired = false;
+        if (MoveShip(s, input, dt, Rules.ControlsLocked, predicting: true))
+        {
+            fired = CanFire(s, input);
+            if (fired)
+            {
+                s.FireCooldown = Config.FireCooldown;
+                s.Fuel -= Config.FireFuel;
+                s.SpawnProtection = 0f;
+            }
+            s.GrabHeld = input.Grab;
+        }
+
+        if (towed != null)
+        {
+            MoveBall(towed, dt);
+            ApplyRope(s, towed);
+            ResolveBallWalls(towed);
+        }
+        return fired;
+    }
+
+    private bool CanFire(Ship s, ShipInput input) =>
+        input.Fire && !s.Shield && Rules.WeaponsEnabled && s.FireCooldown <= 0f && s.Fuel >= Config.FireFuel;
+
+    /// <summary>Turning, shield, thrust, gravity, movement, walls and refueling.</summary>
+    /// <returns>False if the controls are locked or the ship crashed.</returns>
+    private bool MoveShip(Ship s, ShipInput input, float dt, bool locked, bool predicting)
+    {
+        var cfg = Config;
         float turn = Math.Clamp(input.Turn, -1f, 1f);
         s.Heading = MathUtil.WrapAngle(s.Heading + turn * cfg.TurnSpeed * dt);
         if (locked)
         {
             s.Thrusting = false;
             s.Shield = false;
-            return;
+            return false;
         }
 
         s.SpawnProtection = MathF.Max(0f, s.SpawnProtection - dt);
@@ -172,8 +262,8 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         s.Velocity = MathUtil.ClampLength(s.Velocity + accel * dt, cfg.MaxSpeed);
         s.Position = Map.WrapPosition(s.Position + s.Velocity * dt);
 
-        ResolveWallCollisions(s);
-        if (!s.Alive) return;
+        ResolveWallCollisions(s, predicting);
+        if (!s.Alive) return false;
 
         s.Refueling = false;
         foreach (var station in Map.FuelStations)
@@ -185,15 +275,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
             }
         }
         s.Fuel = Math.Clamp(s.Fuel + (s.Refueling ? cfg.RefuelPerSec : cfg.PassiveRefuelPerSec) * dt, 0f, cfg.MaxFuel);
-
-        if (input.Fire && !s.Shield && Rules.WeaponsEnabled && s.FireCooldown <= 0f && s.Fuel >= cfg.FireFuel)
-        {
-            FireBullet(s);
-        }
-
-        bool grabPressed = input.Grab && !s.GrabHeld;
-        s.GrabHeld = input.Grab;
-        if (grabPressed && Balls.Count > 0) ToggleGrab(s);
+        return true;
     }
 
     public Ball? CarriedBy(Ship s)
@@ -250,9 +332,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         {
             if (ball.State == BallState.Home) continue;
 
-            ball.Velocity += GravityAt(ball.Position) * dt;
-            ball.Velocity *= MathF.Max(0f, 1f - 0.15f * dt);
-            ball.Position = Map.WrapPosition(ball.Position + ball.Velocity * dt);
+            MoveBall(ball, dt);
 
             if (ball.State == BallState.Carried)
             {
@@ -264,6 +344,13 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
             ResolveBallWalls(ball);
             if (ball.State == BallState.Loose) ball.LooseTime += dt;
         }
+    }
+
+    private void MoveBall(Ball ball, float dt)
+    {
+        ball.Velocity += GravityAt(ball.Position) * dt;
+        ball.Velocity *= MathF.Max(0f, 1f - 0.15f * dt);
+        ball.Position = Map.WrapPosition(ball.Position + ball.Velocity * dt);
     }
 
     /// <summary>An inextensible rope: when taut it pulls ship and ball together, sharing the correction by mass.</summary>
@@ -317,6 +404,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         }
         Bullets.Add(new Bullet
         {
+            Id = _nextBulletId++,
             Position = position,
             PrevPosition = position,
             Velocity = s.Velocity + dir * cfg.BulletSpeed,
@@ -324,7 +412,8 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         });
     }
 
-    private void ResolveWallCollisions(Ship s)
+    /// <param name="predicting">Bounce off instead of crashing, and emit no events.</param>
+    private void ResolveWallCollisions(Ship s, bool predicting)
     {
         var cfg = Config;
         for (int iteration = 0; iteration < 4; iteration++)
@@ -337,7 +426,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
             float impact = -vn;
             if (impact > cfg.CrashSpeed)
             {
-                if (!s.IsProtected)
+                if (!s.IsProtected && !predicting)
                 {
                     Kill(s, null, DeathCause.Wall);
                     return;
@@ -347,7 +436,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
 
             var tangential = s.Velocity - n * vn;
             s.Velocity = tangential * cfg.WallFriction - n * (vn * cfg.WallRestitution);
-            if (impact > 40f)
+            if (impact > 40f && !predicting)
             {
                 Emit(new GameEvent(GameEventType.WallBounce, s.Id, Position: s.Position - n * cfg.ShipRadius, Value: impact));
             }

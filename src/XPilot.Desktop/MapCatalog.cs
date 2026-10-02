@@ -21,7 +21,7 @@ public sealed class MapCatalog
         var dir = Path.Combine(AppContext.BaseDirectory, "maps");
         if (Directory.Exists(dir))
         {
-            foreach (var file in Directory.GetFiles(dir, "*.xpm").Order())
+            foreach (var file in MapLoader.FindMaps(dir))
             {
                 try
                 {

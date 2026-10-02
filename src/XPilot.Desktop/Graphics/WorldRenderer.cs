@@ -18,13 +18,16 @@ public sealed class WorldRenderer
     private readonly List<Vector2[]> _fillTriangles = [];
     private readonly List<Vector2> _wrapOffsets = [];
 
+    /// <summary>Draw other pilots' names under their ships.</summary>
+    public bool ShowNames { get; set; } = true;
+
     public WorldRenderer(Map map)
     {
         _map = map;
         BuildGeometry();
     }
 
-    public void Draw(PrimitiveBatch pb, Camera cam, Match match, ParticleSystem particles, float alpha, float time)
+    public void Draw(PrimitiveBatch pb, Camera cam, IMatchView match, ParticleSystem particles, float alpha, float time)
     {
         var world = match.World;
         var view = cam.VisibleBounds;
@@ -72,7 +75,7 @@ public sealed class WorldRenderer
     }
 
     /// <summary>Where the player should be heading: the next checkpoint, or the relevant ball or treasure.</summary>
-    private (System.Numerics.Vector2 Target, Color Color, float HideWithin)? Objective(Match match, Ship player)
+    private (System.Numerics.Vector2 Target, Color Color, float HideWithin)? Objective(IMatchView match, Ship player)
     {
         var world = match.World;
         if (world.Rules.Mode == GameModeKind.Race)
@@ -152,13 +155,13 @@ public sealed class WorldRenderer
             pb.Circle(pos, 22f, 1.5f, color * 0.6f, 24, dashed: true, rotation: time * 2f);
         }
 
-        if (!isPlayer)
+        if (!isPlayer && ShowNames)
         {
             VectorFont.Draw(pb, s.Name, pos + new Vector2(0, 24), 8f, color * 0.55f, TextAlign.Center, 1.1f, glow: 0f);
         }
     }
 
-    private void DrawMapObjects(PrimitiveBatch pb, Match match, Func<System.Numerics.Vector2, Vector2> toView, RectangleF view, float time)
+    private void DrawMapObjects(PrimitiveBatch pb, IMatchView match, Func<System.Numerics.Vector2, Vector2> toView, RectangleF view, float time)
     {
         var world = match.World;
 

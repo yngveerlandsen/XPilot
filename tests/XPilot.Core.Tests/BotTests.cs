@@ -7,12 +7,12 @@ namespace XPilot.Core.Tests;
 
 public class BotTests(ITestOutputHelper output)
 {
-    public static IEnumerable<object[]> RaceMaps => TestUtil.MapFiles
+    public static IEnumerable<object[]> RaceMaps => TestUtil.OwnMapFiles
         .Select(MapLoader.Load)
         .Where(m => m.Mode == GameModeKind.Race)
         .Select(m => new object[] { Path.GetFileNameWithoutExtension(m.SourcePath!) });
 
-    public static IEnumerable<object[]> DogfightMaps => TestUtil.MapFiles
+    public static IEnumerable<object[]> DogfightMaps => TestUtil.OwnMapFiles
         .Select(MapLoader.Load)
         .Where(m => m.Mode == GameModeKind.Dogfight)
         .Select(m => new object[] { Path.GetFileNameWithoutExtension(m.SourcePath!) });

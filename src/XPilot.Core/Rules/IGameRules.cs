@@ -21,4 +21,13 @@ public interface IGameRules
     void Respawn(World world, Ship ship);
     /// <summary>Ships ordered from first to last place.</summary>
     IReadOnlyList<Ship> GetStandings(World world);
+
+    /// <summary>Called when a ship joins a match in progress. It is dead until it respawns on the next tick.</summary>
+    void OnShipJoined(World world, Ship ship)
+    {
+    }
+
+    /// <summary>Writes the mode's own state (scores, timers, match over) so a network client can mirror it.</summary>
+    void WriteState(BinaryWriter writer);
+    void ReadState(BinaryReader reader);
 }

@@ -82,7 +82,7 @@ public class MapTests
         Assert.False(Collision.CircleVsPolygon(new Vector2(50, 16), 10, square, out _, out _));
     }
 
-    public static IEnumerable<object[]> ShippedMaps => TestUtil.MapFiles.Select(f => new object[] { Path.GetFileName(f) });
+    public static IEnumerable<object[]> ShippedMaps => TestUtil.MapFiles.Select(f => new object[] { Path.GetRelativePath(TestUtil.MapsDirectory, f) });
 
     [Theory]
     [MemberData(nameof(ShippedMaps))]

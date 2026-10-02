@@ -16,6 +16,7 @@ public sealed class XPilotGame : Game
     private readonly GraphicsDeviceManager _graphics;
     private Screen? _screen;
     private Screen? _pendingScreen;
+    private float _fps;
 
     public XPilotGame()
     {
@@ -28,25 +29,30 @@ public sealed class XPilotGame : Game
             GraphicsProfile = GraphicsProfile.HiDef,
             HardwareModeSwitch = false,
         };
-        _graphics.PreparingDeviceSettings += (_, e) => e.GraphicsDeviceInformation.PresentationParameters.MultiSampleCount = 4;
+        _graphics.PreparingDeviceSettings += (_, e) =>
+            e.GraphicsDeviceInformation.PresentationParameters.MultiSampleCount = Settings.Antialiasing ? 4 : 0;
         IsFixedTimeStep = false;
         IsMouseVisible = false;
         Window.Title = "XPilot";
         Window.AllowUserResizing = true;
         Window.ClientSizeChanged += OnClientSizeChanged;
+        Window.TextInput += (_, e) => Input.OnTextInput(e.Character);
     }
 
     public Settings Settings { get; private set; } = new();
     public InputState Input { get; } = new();
     public PrimitiveBatch Primitives { get; private set; } = null!;
     public SoundBank Sounds { get; private set; } = null!;
+    public MusicPlayer Music { get; private set; } = null!;
     public MapCatalog Maps { get; private set; } = null!;
     public Starfield Starfield { get; } = new();
+    /// <summary>The bot fight behind the menus.</summary>
+    public MenuBackground Background { get; private set; } = null!;
 
     protected override void Initialize()
     {
         Settings = Settings.Load();
-        if (Settings.Fullscreen) SetFullscreen(true);
+        ApplyVideoSettings();
         base.Initialize();
     }
 
@@ -54,13 +60,16 @@ public sealed class XPilotGame : Game
     {
         Primitives = new PrimitiveBatch(GraphicsDevice);
         Sounds = SoundBank.Create(Settings.Volume);
+        Music = MusicPlayer.Load();
         Maps = MapCatalog.Load();
         foreach (var error in Maps.Errors) Console.Error.WriteLine($"Map error: {error}");
+        Background = MenuBackground.Create(Maps);
         SetScreen(QuickStartScreen() ?? new MainMenuScreen(this));
     }
 
     /// <summary>
-    /// Developer shortcut: <c>XPilot --map arena [--bots 5] [--difficulty hard] [--spectate]</c> skips the menu.
+    /// Developer shortcuts that skip the menu: <c>XPilot --map arena [--bots 5] [--difficulty hard] [--spectate]</c>
+    /// plays locally, and <c>XPilot --connect host[:port] [--name Ace]</c> joins a server.
     /// </summary>
     private Screen? QuickStartScreen()
     {
@@ -69,6 +78,13 @@ public sealed class XPilotGame : Game
         {
             int i = Array.IndexOf(args, name);
             return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+        }
+
+        if (Arg("--connect") is { } address)
+        {
+            var connection = new Net.ClientConnection(Arg("--name") ?? Settings.PlayerName);
+            connection.Connect(address);
+            return new PlayScreen(this, new NetworkSession(connection, null));
         }
 
         var mapName = Arg("--map");
@@ -91,6 +107,15 @@ public sealed class XPilotGame : Game
         });
     }
 
+    /// <summary>Applies the fullscreen, VSync and antialiasing settings, keeping the window's size unless fullscreen changes.</summary>
+    public void ApplyVideoSettings()
+    {
+        _graphics.SynchronizeWithVerticalRetrace = Settings.VSync;
+        _graphics.PreferMultiSampling = Settings.Antialiasing;
+        if (_graphics.IsFullScreen != Settings.Fullscreen) SetFullscreen(Settings.Fullscreen);
+        else _graphics.ApplyChanges();
+    }
+
     /// <summary>Switches screens at the start of the next update.</summary>
     public void SetScreen(Screen screen) => _pendingScreen = screen;
 
@@ -101,6 +126,7 @@ public sealed class XPilotGame : Game
 
         if (_pendingScreen != null)
         {
+            _screen?.Leave();
             _screen = _pendingScreen;
             _pendingScreen = null;
             _screen.Enter();
@@ -113,6 +139,11 @@ public sealed class XPilotGame : Game
             Settings.Save();
         }
 
+        bool audible = IsActive || !Settings.MuteInBackground;
+        Sounds.Volume = audible ? Settings.Volume : 0f;
+        Music.Volume = audible ? Settings.MusicVolume : 0f;
+        if (Settings.MusicVolume > 0f && Sounds.Enabled) Music.Update();
+        else if (Music.NowPlaying != null) Music.Stop();
         _screen?.Update(dt);
         base.Update(gameTime);
     }
@@ -120,12 +151,25 @@ public sealed class XPilotGame : Game
     protected override void Draw(GameTime gameTime)
     {
         GraphicsDevice.Clear(Palette.Background);
-        _screen?.Draw((float)gameTime.ElapsedGameTime.TotalSeconds);
+        float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+        _screen?.Draw(dt);
+        if (Settings.ShowFps && dt > 0f)
+        {
+            _fps = _fps <= 0f ? 1f / dt : MathHelper.Lerp(_fps, 1f / dt, 0.05f);
+            var vp = GraphicsDevice.Viewport;
+            float s = vp.Height / 720f;
+            Primitives.Begin(Matrix.Identity, PrimitiveBatch.Additive);
+            VectorFont.Draw(Primitives, $"{_fps:0} FPS", new Vector2(vp.Width / 2f, vp.Height - 18 * s), 9f * s, Palette.TextDim, TextAlign.Center);
+            Primitives.End();
+        }
         base.Draw(gameTime);
     }
 
     protected override void UnloadContent()
     {
+        _screen?.Leave();
+        _screen = null;
+        Music?.Dispose();
         Sounds?.Dispose();
         Primitives?.Dispose();
         base.UnloadContent();
