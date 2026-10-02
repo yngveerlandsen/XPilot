@@ -1,7 +1,7 @@
 name: Release
 
-# Pushing a tag like v0.2.0 builds the Windows zip and attaches it to that tag's GitHub release, creating the
-# release if it doesn't exist. Tags with a suffix (v0.2.0-beta.1) are marked as pre-releases.
+# Pushing a tag like v0.2.0 builds the Windows game and the dedicated server (Windows and Linux) and attaches
+# the zips to that tag's GitHub release, creating the release if it doesn't exist. Tags with a suffix (v0.2.0-beta.1) are marked as pre-releases.
 on:
   push:
     tags: ['v*']
@@ -40,18 +40,25 @@ jobs:
           version="${TAG#v}"
           dotnet publish src/XPilot.Desktop -c Release -r win-x64 --self-contained \
             -p:Version="$version" -o "out/XPilot-$TAG-win-x64"
+          for rid in win-x64 linux-x64; do
+            dotnet publish src/XPilot.Server -c Release -r "$rid" --self-contained \
+              -p:Version="$version" -o "out/XPilot-Server-$TAG-$rid"
+          done
 
       - name: Zip
         shell: pwsh
-        run: Compress-Archive -Path "out/XPilot-$env:TAG-win-x64" -DestinationPath "XPilot-$env:TAG-win-x64.zip"
+        run: |
+          Get-ChildItem out -Directory | ForEach-Object {
+            Compress-Archive -Path $_.FullName -DestinationPath "$($_.Name).zip"
+          }
 
       - name: Upload to release
         run: |
-          zip="XPilot-$TAG-win-x64.zip"
+          zips=(XPilot-*.zip)
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$zip" --clobber
+            gh release upload "$TAG" "${zips[@]}" --clobber
           else
             prerelease=""
             [[ "$TAG" == *-* ]] && prerelease="--prerelease"
-            gh release create "$TAG" "$zip" --title "$TAG" --generate-notes $prerelease
+            gh release create "$TAG" "${zips[@]}" --title "$TAG" --generate-notes $prerelease
           fi

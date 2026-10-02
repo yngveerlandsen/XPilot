@@ -1,7 +1,7 @@
 # XPilot (remake)
 
-A modern single-player take on [XPilot](https://en.wikipedia.org/wiki/XPilot): inertia-based ship
-physics, gravity, shields, fuel, and glowing vector graphics, against AI bots.
+A modern take on [XPilot](https://en.wikipedia.org/wiki/XPilot): inertia-based ship physics, gravity,
+shields, fuel, and glowing vector graphics, against AI bots or other players over the network.
 Modes: **Dogfight** (free-for-all, first to 10 kills), **Race** (checkpoints and laps) and
 **Capture the ball** (Red vs Blue: tow the enemy ball into your own treasure, first to 3).
 
@@ -17,7 +17,8 @@ dotnet test
 > On this machine `C:\Program Files (x86)\dotnet` is first on PATH and has no SDKs. Use
 > `"C:\Program Files\dotnet\dotnet.exe"` or move `C:\Program Files\dotnet` above it in PATH.
 
-Developer quick start (skips the menu): `XPilot --map arena --bots 5 [--difficulty hard] [--spectate]`.
+Developer quick start (skips the menu): `XPilot --map arena --bots 5 [--difficulty hard] [--spectate]`,
+or `XPilot --connect host[:port] [--name Ace]` to join a server.
 
 ## Controls
 
@@ -29,7 +30,8 @@ Developer quick start (skips the menu): `XPilot --map arena --bots 5 [--difficul
 | Shield | Down, S, Shift | Space | B, Left trigger/shoulder |
 | Grab / release ball | E, Right Shift | Ctrl | Y |
 
-Tab shows scores, Esc pauses, F11 toggles fullscreen. Switch the preset in the menu, or override single
+Tab shows scores, Esc pauses (in network games it opens a menu and the game keeps running), T chats in
+network games, F11 toggles fullscreen. Switch the preset in the menu, or override single
 actions in `%APPDATA%\XPilot\settings.json`, e.g. `"CustomBindings": { "Fire": ["J"] }`.
 
 ## Rules worth knowing
@@ -42,12 +44,58 @@ actions in `%APPDATA%\XPilot\settings.json`, e.g. `"CustomBindings": { "Fire": [
   into your own treasure box. Kill a carrier to make them drop it. Touch your own dropped ball to send it home;
   otherwise it returns by itself after 20 seconds. Teammates cannot hurt each other. Capture = +3, kill = +1.
 
+## Multiplayer
+
+- **Host:** pick a mode and map in the main menu and choose *Host*. The game runs a server inside itself on
+  UDP port 15345 and you join it. The server goes through every map of that mode in turn, starting with the
+  one you picked, with 10 seconds of results between matches. Bots fill the free seats, up to the bot count
+  you chose. When the map is full, a joining player takes a bot's place.
+- **Join:** *Join network game* lists servers on your LAN, or type an address (`host` or `host:port`).
+  People outside your network need UDP port 15345 forwarded to the host, or a master server (below).
+- Set your name with *Name* in the main menu. In ball mode teams are balanced automatically. *Switch team*
+  is in the Esc menu.
+- If every seat already has a human in it, newcomers spectate.
+
+### Dedicated server
+
+```
+dotnet run --project src/XPilot.Server -- --mode ball --bots 4 --name "My server"
+dotnet run --project src/XPilot.Server -- --map arena,caverns --time-limit 300
+dotnet run --project src/XPilot.Server -- --help
+```
+
+Releases include ready-built servers for Windows and Linux (`XPilot-Server-*.zip`). On Linux, run
+`chmod +x XPilot.Server` once after unzipping.
+
+### Internet server list
+
+`XPilot.Server --run-master` runs a master server (UDP 15346), like the original XPilot meta-server. It
+must run somewhere reachable from the internet. Game servers started with `--master host:port` register
+with it. Players who set `"MasterServer": "host:port"` in `settings.json` see those servers in the join
+list. Joining goes through NAT punch-through, so a host behind a typical home router usually doesn't need to
+forward a port. The master only lists servers and introduces players; game traffic goes directly between
+players and the server.
+
+### How it works
+
+The server is the authority: it runs the only real simulation at 60 Hz. Clients send their controls 60
+times a second, repeating the last 8 in each packet so a lost packet costs nothing. The server sends
+snapshots of every ship 30 times a second, and sends events (explosions, captures, bullets fired) reliably.
+Other ships are drawn 100 ms in the past, blended between two snapshots. Your own ship is predicted from
+your inputs, so it responds instantly. When a snapshot shows the server disagreed, the client replays the
+inputs the server hasn't seen yet and smooths out the difference. Bullets fly in straight lines, so clients
+simulate them from where they were fired rather than receiving their positions. The tests in
+`tests/XPilot.Net.Tests` run full games over a simulated network with latency, jitter and packet loss.
+
 ## Project layout
 
-- `src/XPilot.Core`: the simulation, with no graphics dependency. It runs at a fixed 60 Hz, and all control goes through `ShipInput`, so a network server can run it later unchanged.
+- `src/XPilot.Core`: the simulation, with no graphics dependency. It runs at a fixed 60 Hz, and all control goes through `ShipInput`. `Match` holds the bots and any number of humans.
   - `Maps/`: map format, loader and collision. `Simulation/`: the `World` and its entities. `Rules/`: dogfight, race and ball capture. `AI/`: navigation fields and `BotController`.
+- `src/XPilot.Net`: multiplayer. `GameServer` and `GameClient` hold the game logic and don't depend on a transport. `ServerHost`, `ClientConnection`, `ServerBrowser` and `MasterServer` carry them over UDP with [LiteNetLib](https://github.com/RevenantX/LiteNetLib).
+- `src/XPilot.Server`: the dedicated server and master server console app.
 - `src/XPilot.Desktop`: the MonoGame (DesktopGL) client, covering rendering, HUD, input, synthesized sound and menus. There is no content pipeline: text uses a built-in stroke font and sounds are generated in code.
 - `tests/XPilot.Core.Tests`: unit tests plus headless bot matches on every shipped map.
+- `tests/XPilot.Net.Tests`: protocol tests, network games over a simulated network, and end-to-end UDP tests on loopback.
 - `maps/`: text maps (`*.xpm`).
 
 ## Map format
