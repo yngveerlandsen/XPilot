@@ -33,6 +33,18 @@ public class MatchTests
     }
 
     [Fact]
+    public void Capacity_CanExceedTheBases_ForCrowdedMatches()
+    {
+        var match = new Match(new MatchSetup
+        {
+            Map = TestUtil.LoadMap("arena"), IncludePlayer = false, BotCount = 20, Capacity = 20, ScoreLimit = 0, TimeLimit = 0, Seed = 2,
+        });
+        Assert.Equal(20, match.World.Ships.Count);
+        for (int i = 0; i < 600; i++) match.Step();
+        Assert.True(match.World.Ships.Count(s => s.Alive) >= 10, "most of a crowd should be flying, not stuck dead");
+    }
+
+    [Fact]
     public void RemoveHuman_GivesTheSeatBackToABot()
     {
         var match = ServerMatch("arena", 8);

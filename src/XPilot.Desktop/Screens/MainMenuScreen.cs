@@ -22,7 +22,6 @@ public sealed class MainMenuScreen : Screen
     private int _bots;
     private BotDifficulty _difficulty;
     private float _time;
-    private Vector2 _drift;
     /// <summary>The name being typed, or null when not editing it.</summary>
     private string? _editingName;
     private string? _message;
@@ -53,7 +52,7 @@ public sealed class MainMenuScreen : Screen
     public override void Update(float dt)
     {
         _time += dt;
-        _drift += new Vector2(18f, 6f) * dt;
+        Game.Background.Update(dt, Game.Settings.ParticleDensity);
 
         if (_editingName != null)
         {
@@ -249,8 +248,8 @@ public sealed class MainMenuScreen : Screen
         var pb = Primitives;
         var bindings = InputBindings.FromSettings(Game.Settings);
 
+        Game.Background.Draw(Game, pb, vp);
         pb.Begin(Matrix.Identity, PrimitiveBatch.Additive);
-        Game.Starfield.Draw(pb, _drift, vp.Width, vp.Height, _time);
 
         float cx = vp.Width / 2f;
         float glow = 0.85f + 0.15f * MathF.Sin(_time * 2f);

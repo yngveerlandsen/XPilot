@@ -175,7 +175,7 @@ public sealed class PlayScreen : Screen
         var hud = _hud!;
         hud.ChatInput = _chatInput;
 
-        EmitThrustParticles(dt);
+        Effects.ThrustTrails(_particles, World, dt, ref _thrustSpawn);
         _particles.Update(dt, p => Map.WrapPosition(p.ToNum()).ToXna());
         UpdateCamera(dt);
         hud.Update(dt);
@@ -293,27 +293,6 @@ public sealed class PlayScreen : Screen
             : Vector2.Zero;
     }
 
-    private void EmitThrustParticles(float dt)
-    {
-        _thrustSpawn += dt * 70f * _particles.Density;
-        int count = (int)_thrustSpawn;
-        _thrustSpawn -= count;
-        if (count == 0) return;
-        foreach (var s in World.Ships)
-        {
-            if (!s.Alive || !s.Thrusting) continue;
-            var dir = MathUtil.FromAngle(s.Heading).ToXna();
-            var tail = s.Position.ToXna() - dir * 10f;
-            for (int i = 0; i < count; i++)
-            {
-                float spread = _particles.Random(-0.35f, 0.35f);
-                var back = new Vector2(-dir.X * MathF.Cos(spread) + dir.Y * MathF.Sin(spread), -dir.Y * MathF.Cos(spread) - dir.X * MathF.Sin(spread));
-                var color = Color.Lerp(new Color(255, 200, 80), new Color(255, 70, 30), _particles.Random(0f, 1f));
-                _particles.Spawn(tail, s.Velocity.ToXna() + back * _particles.Random(140f, 260f), _particles.Random(0.15f, 0.4f), color, 1.5f, 3f);
-            }
-        }
-    }
-
     private void HandleEvents(List<GameEvent> events)
     {
         var hud = _hud!;
@@ -334,7 +313,7 @@ public sealed class PlayScreen : Screen
                     break;
 
                 case GameEventType.ShipDestroyed when ship != null:
-                    Explode(pos, e.Velocity.ToXna(), Palette.Ship(ship));
+                    Effects.Explode(_particles, pos, e.Velocity.ToXna(), Palette.Ship(ship));
                     Sounds.Play("explosion", MathF.Max(volume, isPlayer ? 1f : 0f), (float)_rng.NextDouble() * 0.2f - 0.1f, pan);
                     hud.AddFeed(DeathMessage(ship, other, e.Cause), other != null && other != ship ? Palette.Ship(other) : Palette.TextDim);
                     if (isPlayer)
@@ -357,12 +336,12 @@ public sealed class PlayScreen : Screen
                     break;
 
                 case GameEventType.ShieldHit:
-                    _particles.Burst(pos, Vector2.Zero, 12, 60f, 220f, Palette.Accent, 0.2f, 0.45f);
+                    Effects.ShieldSpark(_particles, pos);
                     Sounds.Play("shield", volume, 0f, pan);
                     break;
 
                 case GameEventType.BulletHitWall:
-                    _particles.Burst(pos, Vector2.Zero, 4, 30f, 120f, new Color(200, 210, 255), 0.1f, 0.3f, 1.2f);
+                    Effects.BulletSpark(_particles, pos);
                     break;
 
                 case GameEventType.ShipSpawned when isPlayer:
@@ -473,14 +452,6 @@ public sealed class PlayScreen : Screen
         DeathCause.Collision => $"{victim.Name} COLLIDED",
         _ => $"{victim.Name} CRASHED",
     };
-
-    private void Explode(Vector2 pos, Vector2 velocity, Color color)
-    {
-        var drift = velocity * 0.4f;
-        _particles.Burst(pos, drift, 50, 40f, 360f, color, 0.4f, 1.3f, 1.8f);
-        _particles.Burst(pos, drift, 30, 20f, 200f, new Color(255, 200, 120), 0.3f, 0.9f, 1.5f);
-        _particles.Burst(pos, drift, 10, 10f, 90f, Color.White, 0.8f, 1.8f, 2.2f);
-    }
 
     /// <summary>Volume and stereo pan for a sound at a world position, relative to the camera.</summary>
     private (float Volume, float Pan) Spatial(System.Numerics.Vector2 position)

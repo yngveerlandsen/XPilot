@@ -16,7 +16,6 @@ public sealed class JoinScreen(XPilotGame game) : Screen(game)
     /// <summary>0 is the address line, then one row per server, then BACK.</summary>
     private int _selected;
     private float _time;
-    private Vector2 _drift;
 
     private IReadOnlyList<ServerEntry> Servers => _browser.Servers;
     private int RowCount => Servers.Count + 2;
@@ -26,7 +25,7 @@ public sealed class JoinScreen(XPilotGame game) : Screen(game)
     public override void Update(float dt)
     {
         _time += dt;
-        _drift += new Vector2(18f, 6f) * dt;
+        Game.Background.Update(dt, Game.Settings.ParticleDensity);
         _browser.Poll();
         _selected = Math.Clamp(_selected, 0, RowCount - 1);
 
@@ -106,8 +105,8 @@ public sealed class JoinScreen(XPilotGame game) : Screen(game)
         float cx = vp.Width / 2f;
         var pb = Primitives;
 
+        Game.Background.Draw(Game, pb, vp);
         pb.Begin(Matrix.Identity, PrimitiveBatch.Additive);
-        Game.Starfield.Draw(pb, _drift, vp.Width, vp.Height, _time);
         VectorFont.Draw(pb, "JOIN GAME", new Vector2(cx, 60 * s), 40f * s, Palette.Accent, TextAlign.Center, 3f * s);
         VectorFont.Draw(pb, $"PLAYING AS {Game.Settings.PlayerName.ToUpperInvariant()}", new Vector2(cx, 120 * s), 11f * s, Palette.TextDim, TextAlign.Center);
 

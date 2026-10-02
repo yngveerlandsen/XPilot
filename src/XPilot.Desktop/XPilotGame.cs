@@ -46,6 +46,8 @@ public sealed class XPilotGame : Game
     public MusicPlayer Music { get; private set; } = null!;
     public MapCatalog Maps { get; private set; } = null!;
     public Starfield Starfield { get; } = new();
+    /// <summary>The bot fight behind the menus.</summary>
+    public MenuBackground Background { get; private set; } = null!;
 
     protected override void Initialize()
     {
@@ -61,6 +63,7 @@ public sealed class XPilotGame : Game
         Music = MusicPlayer.Load();
         Maps = MapCatalog.Load();
         foreach (var error in Maps.Errors) Console.Error.WriteLine($"Map error: {error}");
+        Background = MenuBackground.Create(Maps);
         SetScreen(QuickStartScreen() ?? new MainMenuScreen(this));
     }
 

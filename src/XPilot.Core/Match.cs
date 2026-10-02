@@ -23,6 +23,8 @@ public sealed class MatchSetup
     public float? TimeLimit { get; init; }
     public int? Laps { get; init; }
     public GameConfig? Config { get; init; }
+    /// <summary>Most ships allowed. Defaults to one per base; more than that share bases.</summary>
+    public int? Capacity { get; init; }
 }
 
 /// <summary>What the renderer and HUD draw: a world, and the ship the local player flies (if any).</summary>
@@ -74,8 +76,8 @@ public sealed class Match : IMatchView
     public Ship? Player { get; }
     public IReadOnlyList<BotController> Bots => _bots;
     public IReadOnlyList<Ship> Humans => _humans;
-    /// <summary>Most ships the match holds: one per base.</summary>
-    public int Capacity => World.Map.Bases.Count;
+    /// <summary>Most ships the match holds: one per base unless the setup says otherwise.</summary>
+    public int Capacity => Setup.Capacity ?? World.Map.Bases.Count;
     private bool IsTeamMode => World.Map.Mode == GameModeKind.Ball;
 
     /// <summary>The settings a match with this setup runs on.</summary>

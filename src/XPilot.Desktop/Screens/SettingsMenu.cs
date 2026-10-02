@@ -355,12 +355,11 @@ public sealed class SettingsScreen(XPilotGame game) : Screen(game)
 {
     private readonly SettingsMenu _menu = new(game, inGame: false);
     private float _time;
-    private Vector2 _drift;
 
     public override void Update(float dt)
     {
         _time += dt;
-        _drift += new Vector2(18f, 6f) * dt;
+        Game.Background.Update(dt, Game.Settings.ParticleDensity);
         _menu.Update(dt);
         if (!_menu.IsOpen) Game.SetScreen(new MainMenuScreen(Game));
     }
@@ -368,9 +367,7 @@ public sealed class SettingsScreen(XPilotGame game) : Screen(game)
     public override void Draw(float dt)
     {
         var vp = Game.GraphicsDevice.Viewport;
-        Primitives.Begin(Matrix.Identity, PrimitiveBatch.Additive);
-        Game.Starfield.Draw(Primitives, _drift, vp.Width, vp.Height, _time);
-        Primitives.End();
+        Game.Background.Draw(Game, Primitives, vp);
         _menu.Draw(Primitives, vp, _time);
     }
 }
