@@ -59,6 +59,39 @@ public class SettingsTests
         Assert.Equal(0.5f, copy.ScreenShake);
     }
 
+    [Theory]
+    [InlineData(null, Settings.DefaultMasterServer)]
+    [InlineData("", null)]
+    [InlineData("  ", null)]
+    [InlineData(" example.com:2000 ", "example.com:2000")]
+    public void MasterServer_DefaultsToThePublicList_AndCanBeCleared(string? stored, string? effective) =>
+        Assert.Equal(effective, new Settings { MasterServer = stored }.EffectiveMasterServer);
+
+    [Fact]
+    public void OlderSettingsFiles_WithoutAMasterServer_StayLanOnly()
+    {
+        var settings = Settings.Parse("""{ "MasterServer": null, "PlayerName": "Old" }""");
+        Assert.Null(settings.EffectiveMasterServer);
+        Assert.False(settings.ListHostedGames);
+        Assert.Equal(Settings.CurrentVersion, settings.Version);
+    }
+
+    [Fact]
+    public void OlderSettingsFiles_WithTheirOwnMasterServer_KeepListingHostedGames()
+    {
+        var settings = Settings.Parse("""{ "MasterServer": "games.example.com" }""");
+        Assert.Equal("games.example.com", settings.EffectiveMasterServer);
+        Assert.True(settings.ListHostedGames);
+    }
+
+    [Fact]
+    public void CurrentSettingsFiles_AreLeftAsTheyAre()
+    {
+        var settings = Settings.Parse($$"""{ "Version": {{Settings.CurrentVersion}}, "MasterServer": null }""");
+        Assert.Equal(Settings.DefaultMasterServer, settings.EffectiveMasterServer);
+        Assert.False(settings.ListHostedGames);
+    }
+
     [Fact]
     public void MatchRuleDefaults_LeaveTheModeAndMapInCharge()
     {

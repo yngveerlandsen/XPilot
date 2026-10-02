@@ -102,8 +102,11 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
                 if (int.TryParse(t, out int port) && port is > 0 and < 65536) S.HostPort = port;
                 else _message = "PORTS GO FROM 1 TO 65535";
             })),
-            new("MASTER SERVER", () => string.IsNullOrWhiteSpace(S.MasterServer) ? "NONE (LAN ONLY)" : S.MasterServer.ToUpperInvariant(),
-                Activate: () => Edit(S.MasterServer ?? "", 64, t => S.MasterServer = string.IsNullOrWhiteSpace(t) ? null : t.Trim())),
+            new("MASTER SERVER", () => S.EffectiveMasterServer?.ToUpperInvariant() ?? "NONE (LAN ONLY)",
+                Activate: () => Edit(S.EffectiveMasterServer ?? "", 64, t =>
+                    S.MasterServer = t.Trim() == Settings.DefaultMasterServer ? null : t.Trim())),
+            new("LIST MY HOSTED GAMES", () => OnOff(S.ListHostedGames), _ => S.ListHostedGames = !S.ListHostedGames),
+            new("RESET MASTER SERVER", () => "", Activate: () => S.MasterServer = null),
             new("RESET HOST PORT", () => "", Activate: () => S.HostPort = Protocol.DefaultPort),
         ],
     };
@@ -305,7 +308,7 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
         if (Tabs[_tab] == Tab.Game) Note(pb, cx, y + 10 * s, s, "MATCH RULES APPLY TO GAMES YOU PLAY OR HOST" + (inGame ? ", FROM THE NEXT ONE" : ""));
         if (Tabs[_tab] == Tab.Audio) Note(pb, cx, y + 10 * s, s, "ENTER ON NOW PLAYING SKIPS TO ANOTHER TRACK - ADD .OGG FILES TO THE MUSIC FOLDER");
         if (Tabs[_tab] == Tab.Controls) Note(pb, cx, y + 10 * s, s, "GAMEPAD: STICK TURNS, A/RT THRUST, X/RB FIRE, B/LT SHIELD, Y GRAB");
-        if (Tabs[_tab] == Tab.Network) Note(pb, cx, y + 10 * s, s, "MASTER SERVER IS HOST:PORT OF AN XPILOT.SERVER --RUN-MASTER");
+        if (Tabs[_tab] == Tab.Network) Note(pb, cx, y + 10 * s, s, "CLEAR THE MASTER SERVER FOR LAN ONLY - LISTING HOSTED GAMES SHOWS YOUR ADDRESS");
 
         if (_message != null)
         {

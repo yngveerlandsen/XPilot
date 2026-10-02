@@ -8,6 +8,15 @@ public sealed class Settings
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    /// <summary>
+    /// 1: <see cref="MasterServer"/> null means the public default (before, it meant LAN only), and hosted games
+    /// are only listed with <see cref="ListHostedGames"/>.
+    /// </summary>
+    public const int CurrentVersion = 1;
+
+    /// <summary>The settings format the file was written in; files from before versioning read as 0.</summary>
+    public int Version { get; set; }
+
     public string ControlPreset { get; set; } = "Modern";
     /// <summary>Optional per-action key overrides, e.g. { "Fire": ["J", "Space"] }.</summary>
     public Dictionary<string, string[]>? CustomBindings { get; set; }
@@ -53,8 +62,24 @@ public sealed class Settings
     public string LastAddress { get; set; } = "";
     /// <summary>UDP port for hosting a game.</summary>
     public int HostPort { get; set; } = Net.Protocol.DefaultPort;
-    /// <summary>"host:port" of a master server for the internet server list, or null for LAN only.</summary>
+    public const string DefaultMasterServer = "xpilot.hjemmelaga.online";
+
+    /// <summary>
+    /// "host[:port]" of the master server for the internet game list. Null (also what older settings files
+    /// have) means <see cref="DefaultMasterServer"/>; an empty string means LAN only.
+    /// </summary>
     public string? MasterServer { get; set; }
+
+    /// <summary>Announce games hosted from the menu on the internet list. Off by default: it shows the host's address.</summary>
+    public bool ListHostedGames { get; set; }
+
+    [JsonIgnore]
+    public string? EffectiveMasterServer => MasterServer switch
+    {
+        null => DefaultMasterServer,
+        var m when string.IsNullOrWhiteSpace(m) => null,
+        var m => m.Trim(),
+    };
 
     public static string FilePath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XPilot", "settings.json");
@@ -65,15 +90,36 @@ public sealed class Settings
         {
             if (File.Exists(FilePath))
             {
-                return JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath), JsonOptions) ?? new Settings();
+                var loaded = Parse(File.ReadAllText(FilePath));
+                if (loaded.Migrated) loaded.Save();
+                return loaded;
             }
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Could not read settings: {ex.Message}");
         }
-        var settings = new Settings();
+        var settings = new Settings { Version = CurrentVersion };
         settings.Save();
+        return settings;
+    }
+
+    [JsonIgnore]
+    private bool Migrated { get; set; }
+
+    /// <summary>Reads settings JSON, bringing older files up to <see cref="CurrentVersion"/> without changing what they meant.</summary>
+    public static Settings Parse(string json)
+    {
+        var settings = JsonSerializer.Deserialize<Settings>(json, JsonOptions) ?? new Settings();
+        if (settings.Version < 1)
+        {
+            // Before the public default, no master server meant LAN only, and a master server you set also
+            // listed the games you hosted. Keep both.
+            if (string.IsNullOrWhiteSpace(settings.MasterServer)) settings.MasterServer = "";
+            else settings.ListHostedGames = true;
+        }
+        settings.Migrated = settings.Version < CurrentVersion;
+        settings.Version = CurrentVersion;
         return settings;
     }
 

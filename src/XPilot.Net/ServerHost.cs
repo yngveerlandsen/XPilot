@@ -27,7 +27,7 @@ public sealed class ServerHost : IDisposable
     private readonly NetManager _net;
     private readonly Dictionary<int, PeerConnection> _connections = [];
     private readonly string _serverId = Guid.NewGuid().ToString("N")[..12];
-    private IPEndPoint? _master;
+    private EndPointLookup? _master;
     private Thread? _thread;
     private volatile bool _stopping;
 
@@ -65,6 +65,8 @@ public sealed class ServerHost : IDisposable
     }
 
     public GameServer Server => _server;
+    /// <summary>Messages about the master server, from the server thread.</summary>
+    public event Action<string>? Log;
     public int Port => _net.LocalPort;
     /// <summary>Set if the server thread crashed.</summary>
     public Exception? Error { get; private set; }
@@ -74,7 +76,11 @@ public sealed class ServerHost : IDisposable
     public bool Start()
     {
         if (!_net.Start(_server.Options.Port)) return false;
-        _master = ParseEndPoint(_server.Options.MasterServer, Protocol.DefaultMasterPort);
+        if (!string.IsNullOrWhiteSpace(_server.Options.MasterServer))
+        {
+            _master = new EndPointLookup(_server.Options.MasterServer, Protocol.DefaultMasterPort,
+                retry: TimeSpan.FromSeconds(15), refresh: TimeSpan.FromMinutes(10));
+        }
         _thread = new Thread(Run) { IsBackground = true, Name = "XPilot server" };
         _thread.Start();
         return true;
@@ -101,9 +107,17 @@ public sealed class ServerHost : IDisposable
                 // Hopelessly behind (the machine stalled): skip ahead instead of fast-forwarding.
                 if (now - nextTick > 0.5) nextTick = now;
 
-                if (_master != null && now >= nextHeartbeat)
+                if (_master != null && _master.Poll())
                 {
-                    RegisterWithMaster(_master);
+                    Log?.Invoke(_master.Result is { } found && !_master.Failed
+                        ? $"Master server {_master.Text} is at {found}"
+                        : $"Could not find master server {_master.Text}; retrying");
+                    // Register straight away with a newly found (or moved) master.
+                    nextHeartbeat = 0;
+                }
+                if (_master?.Result is { } master && now >= nextHeartbeat)
+                {
+                    RegisterWithMaster(master);
                     nextHeartbeat = now + MasterHeartbeatSeconds;
                 }
                 Thread.Sleep(1);
@@ -156,31 +170,6 @@ public sealed class ServerHost : IDisposable
         _net.SendUnconnectedMessage(m.ToArray(), master);
         // Keeps a fresh NAT mapping at the master, which it uses to introduce joining clients.
         _net.NatPunchModule.SendNatIntroduceRequest(master, MasterServer.HostToken(_serverId));
-    }
-
-    public static IPEndPoint? ParseEndPoint(string? text, int defaultPort)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return null;
-        text = text.Trim();
-        string host = text;
-        int port = defaultPort;
-        int colon = text.LastIndexOf(':');
-        if (colon > 0 && text.IndexOf(':') == colon && int.TryParse(text[(colon + 1)..], out int p))
-        {
-            host = text[..colon];
-            port = p;
-        }
-        if (IPAddress.TryParse(host, out var address)) return new IPEndPoint(address, port);
-        try
-        {
-            var addresses = Dns.GetHostAddresses(host);
-            var v4 = addresses.FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? addresses.FirstOrDefault();
-            return v4 == null ? null : new IPEndPoint(v4, port);
-        }
-        catch (System.Net.Sockets.SocketException)
-        {
-            return null;
-        }
     }
 
     public void Dispose()

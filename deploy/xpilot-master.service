@@ -1,0 +1,48 @@
+# systemd unit for the XPilot master server: the internet server list and NAT introductions.
+#
+# Installed to /etc/systemd/system/ by server-setup.sh. It only answers small UDP messages and never relays
+# game traffic, so it gets a tighter cap than the game server.
+
+[Unit]
+Description=XPilot master server
+Documentation=https://github.com/yngveerlandsen/XPilot
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=xpilot
+Group=xpilot
+WorkingDirectory=/opt/xpilot/current
+EnvironmentFile=/etc/xpilot/server.env
+ExecStart=/opt/xpilot/current/XPilot.Server --run-master ${XPILOT_MASTER_PORT}
+Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+Environment=DOTNET_gcServer=0
+
+Restart=always
+RestartSec=5
+
+CPUQuota=20%
+MemoryMax=256M
+Nice=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=xpilot-master
+
+[Install]
+WantedBy=multi-user.target

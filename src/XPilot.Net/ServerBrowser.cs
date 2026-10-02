@@ -20,7 +20,7 @@ public sealed class ServerBrowser : IDisposable
     private const double LanInterval = 2, MasterInterval = 5, Expiry = 12;
 
     private readonly NetManager _net;
-    private readonly IPEndPoint? _master;
+    private readonly EndPointLookup? _master;
     private readonly Dictionary<string, ServerEntry> _servers = [];
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private double _nextLan, _nextMaster;
@@ -32,11 +32,18 @@ public sealed class ServerBrowser : IDisposable
         _net = new NetManager(listener) { AutoRecycle = true, UnconnectedMessagesEnabled = true };
         listener.NetworkReceiveUnconnectedEvent += (remote, reader, _) => OnMessage(remote, reader.GetRemainingBytes());
         _net.Start();
-        _master = ServerHost.ParseEndPoint(masterServer, Protocol.DefaultMasterPort);
+        if (!string.IsNullOrWhiteSpace(masterServer))
+        {
+            _master = new EndPointLookup(masterServer, Protocol.DefaultMasterPort, retry: TimeSpan.FromSeconds(10));
+        }
     }
 
+    /// <summary>A master server is configured (it may not have been found yet).</summary>
     public bool HasMaster => _master != null;
-    public IPEndPoint? Master => _master;
+    /// <summary>The master server's address, once its name has been looked up.</summary>
+    public IPEndPoint? Master => _master?.Result;
+    /// <summary>The master server's name couldn't be looked up; it is retried every few seconds.</summary>
+    public bool MasterNotFound => _master is { Result: null, Failed: true };
 
     /// <summary>Servers heard from recently, LAN servers first. Re-sorted only when the list changes.</summary>
     public IReadOnlyList<ServerEntry> Servers => _sorted ??= _servers.Values
@@ -54,16 +61,17 @@ public sealed class ServerBrowser : IDisposable
     public void Poll()
     {
         _net.PollEvents();
+        _master?.Poll();
         double now = _clock.Elapsed.TotalSeconds;
         if (now >= _nextLan)
         {
             _nextLan = now + LanInterval;
             _net.SendBroadcast(new MessageWriter(MessageType.DiscoveryRequest).ToArray(), Protocol.DefaultPort);
         }
-        if (_master != null && now >= _nextMaster)
+        if (Master is { } master && now >= _nextMaster)
         {
             _nextMaster = now + MasterInterval;
-            _net.SendUnconnectedMessage(new MessageWriter(MessageType.MasterListRequest).ToArray(), _master);
+            _net.SendUnconnectedMessage(new MessageWriter(MessageType.MasterListRequest).ToArray(), master);
         }
         foreach (var key in _servers.Where(kv => now - kv.Value.LastSeen > Expiry).Select(kv => kv.Key).ToList())
         {

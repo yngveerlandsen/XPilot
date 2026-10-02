@@ -14,7 +14,9 @@ const string Usage = """
     Options:
       --name <text>          Server name shown in server lists (default "XPilot")
       --port <n>             UDP port (default 15345)
-      --mode <mode>          dogfight, race or ball: rotate through every map of that mode (default dogfight)
+      --mode <mode>          dogfight, race or ball: rotate through every map of that mode (default dogfight).
+                             random: every map of every mode, in random order
+      --shuffle              Play the maps in random order instead of in turn
       --map <name>           Play only these maps, in order (repeat or comma-separate). Overrides --mode.
       --maps <dir>           Folder with .xpm maps (default: "maps" next to the server)
       --bots <n>             Bots filling free seats (default 3)
@@ -41,11 +43,12 @@ try
         string Next() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{args[i]} needs a value");
         switch (args[i].ToLowerInvariant())
         {
-            case "--name": options.Name = Protocol.CleanName(Next()); break;
+            case "--name": options.Name = Protocol.CleanServerName(Next()); break;
             case "--port": options.Port = int.Parse(Next()); break;
             case "--mode": mode = Next().ToLowerInvariant(); break;
             case "--map": mapNames.AddRange(Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)); break;
             case "--maps": mapsDir = Next(); break;
+            case "--shuffle": options.ShuffleMaps = true; break;
             case "--bots": options.BotCount = int.Parse(Next()); break;
             case "--difficulty": options.Difficulty = Enum.Parse<BotDifficulty>(Next(), true); break;
             case "--score-limit": options.ScoreLimit = int.Parse(Next()); break;
@@ -82,6 +85,13 @@ Console.CancelKeyPress += (_, e) =>
     e.Cancel = true;
     stop.Set();
 };
+// systemd and docker stop services with SIGTERM rather than Ctrl+C.
+using var sigterm = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+    System.Runtime.InteropServices.PosixSignal.SIGTERM, context =>
+    {
+        context.Cancel = true;
+        stop.Set();
+    });
 void Log(string line) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {line}");
 
 if (masterPort is { } port)
@@ -134,15 +144,23 @@ if (mapNames.Count > 0)
 }
 else
 {
-    if (!Enum.TryParse<GameModeKind>(mode, true, out var kind))
+    if (mode is "random" or "all")
     {
-        Console.Error.WriteLine($"Unknown mode '{mode}'. Use dogfight, race or ball.");
+        rotation = available.Select(m => m.File).ToList();
+        options.ShuffleMaps = true;
+    }
+    else if (!Enum.TryParse<GameModeKind>(mode, true, out var kind))
+    {
+        Console.Error.WriteLine($"Unknown mode '{mode}'. Use dogfight, race, ball or random.");
         return 1;
     }
-    rotation = available.Where(m => m.Map.Mode == kind).Select(m => m.File).ToList();
+    else
+    {
+        rotation = available.Where(m => m.Map.Mode == kind).Select(m => m.File).ToList();
+    }
     if (rotation.Count == 0)
     {
-        Console.Error.WriteLine($"No {kind} maps in {mapsDir}.");
+        Console.Error.WriteLine($"No {mode} maps in {mapsDir}.");
         return 1;
     }
 }
@@ -150,6 +168,7 @@ else
 var server = new GameServer(options, rotation.Select(MapLoader.ReadText));
 server.Log += Log;
 using var host = new ServerHost(server);
+host.Log += Log;
 if (!host.Start())
 {
     Console.Error.WriteLine($"Could not open UDP port {options.Port}. Is another server running?");

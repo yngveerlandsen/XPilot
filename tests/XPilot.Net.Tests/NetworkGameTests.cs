@@ -234,6 +234,28 @@ public class NetworkGameTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void ShuffledServer_SwitchesModesBetweenMatches()
+    {
+        var options = new ServerOptions { TimeLimit = 1.5f, IntermissionSeconds = 0.5f, BotCount = 2, ShuffleMaps = true };
+        var server = new GameServer(options, [MapText("arena"), MapText("bastions")]);
+        var game = new SimulatedGame(server, new SimulatedNetwork());
+        var client = game.Join("A");
+        var modes = new List<GameModeKind>();
+        int seen = 0;
+        game.Run(12, () =>
+        {
+            if (!client.IsReady || client.MatchCount == seen) return;
+            seen = client.MatchCount;
+            modes.Add(client.World.Map.Mode);
+        });
+        Assert.True(modes.Count >= 4, $"only {modes.Count} matches");
+        // Never the same map twice in a row, so with two maps the modes alternate.
+        for (int i = 1; i < modes.Count; i++) Assert.NotEqual(modes[i - 1], modes[i]);
+        Assert.NotNull(client.Player);
+        if (client.World.Map.Mode == GameModeKind.Ball) Assert.NotEqual(Teams.None, client.Player!.Team);
+    }
+
+    [Fact]
     public void BallMode_TeamSwitch_AndScoresReachClients()
     {
         var game = new SimulatedGame(Server("bastions", bots: 4), new SimulatedNetwork());

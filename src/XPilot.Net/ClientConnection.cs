@@ -19,6 +19,7 @@ public sealed class ClientConnection : IDisposable
     private readonly string _playerName;
     private NetPeer? _peer;
     private IPEndPoint? _pendingDirect;
+    private EndPointLookup? _lookup;
     private DateTime _natDeadline;
 
     public ClientConnection(string playerName)
@@ -72,13 +73,25 @@ public sealed class ClientConnection : IDisposable
     public void Connect(string address)
     {
         Address = address;
-        var endPoint = ServerHost.ParseEndPoint(address, Protocol.DefaultPort);
-        if (endPoint == null)
+        _lookup = new EndPointLookup(address, Protocol.DefaultPort, retry: TimeSpan.MaxValue);
+        PollLookup();
+    }
+
+    /// <summary>Connects once the address has been looked up, without ever blocking the game loop.</summary>
+    private void PollLookup()
+    {
+        if (_lookup == null) return;
+        _lookup.Poll();
+        if (_lookup.Result is { } endPoint)
         {
-            Fail($"Unknown address '{address}'");
-            return;
+            _lookup = null;
+            Connect(endPoint);
         }
-        Connect(endPoint);
+        else if (_lookup.Failed)
+        {
+            Fail($"Could not find '{_lookup.Text}'");
+            _lookup = null;
+        }
     }
 
     public void Connect(IPEndPoint endPoint)
@@ -108,6 +121,7 @@ public sealed class ClientConnection : IDisposable
     {
         _net.PollEvents();
         _net.NatPunchModule.PollEvents();
+        PollLookup();
         if (_pendingDirect != null && DateTime.UtcNow >= _natDeadline)
         {
             var direct = _pendingDirect;
