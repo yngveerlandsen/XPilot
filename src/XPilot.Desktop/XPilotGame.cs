@@ -143,7 +143,7 @@ public sealed class XPilotGame : Game
         Sounds.Volume = audible ? Settings.Volume : 0f;
         Music.Volume = audible ? Settings.MusicVolume : 0f;
         if (Settings.MusicVolume > 0f && Sounds.Enabled) Music.Update();
-        else if (Music.NowPlaying != null) Music.Dispose();
+        else if (Music.NowPlaying != null) Music.Stop();
         _screen?.Update(dt);
         base.Update(gameTime);
     }

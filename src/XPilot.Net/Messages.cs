@@ -239,6 +239,17 @@ public struct BallSnapshot
 /// <summary>The state of the world after a server tick, sent unreliably about 30 times a second.</summary>
 public sealed class Snapshot
 {
+    /// <summary>Where <see cref="AckSeq"/> sits in an encoded snapshot: after the type, match id and tick.</summary>
+    public const int AckSeqOffset = 1 + 4 + 4;
+
+    /// <summary>A copy of an encoded snapshot with a different <see cref="AckSeq"/>, without encoding it again.</summary>
+    public static byte[] WithAckSeq(byte[] encoded, int ackSeq)
+    {
+        var copy = (byte[])encoded.Clone();
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(copy.AsSpan(AckSeqOffset), ackSeq);
+        return copy;
+    }
+
     public int MatchId;
     public int Tick;
     /// <summary>The last input sequence number the server applied for the receiving client.</summary>
@@ -268,9 +279,9 @@ public sealed class Snapshot
         w.Write(Intermission);
         w.Write((short)RulesState.Length);
         w.Write(RulesState);
-        w.Write((byte)Ships.Count);
+        w.Write((ushort)Ships.Count);
         foreach (var s in Ships) s.Write(w);
-        w.Write((byte)Balls.Count);
+        w.Write((ushort)Balls.Count);
         foreach (var b in Balls) b.Write(w);
         return m.ToArray();
     }
@@ -285,9 +296,9 @@ public sealed class Snapshot
             Intermission = r.ReadSingle(),
         };
         snap.RulesState = r.ReadBytes(MessageReader.CheckCount(r, r.ReadInt16(), 1));
-        int ships = MessageReader.CheckCount(r, r.ReadByte(), ShipState.Size);
+        int ships = MessageReader.CheckCount(r, r.ReadUInt16(), ShipState.Size);
         for (int i = 0; i < ships; i++) snap.Ships.Add(ShipState.Read(r));
-        int balls = MessageReader.CheckCount(r, r.ReadByte(), BallSnapshot.Size);
+        int balls = MessageReader.CheckCount(r, r.ReadUInt16(), BallSnapshot.Size);
         for (int i = 0; i < balls; i++) snap.Balls.Add(BallSnapshot.Read(r));
         return snap;
     }
@@ -451,12 +462,15 @@ public readonly record struct ChatLine(string From, int Team, string Text);
 /// <summary>What a server tells LAN browsers and the master server about itself.</summary>
 public sealed record ServerInfo(string Name, string MapName, string Mode, int Humans, int Capacity, int Port)
 {
+    /// <summary>Longest name or map name sent; anyone can register with a master server, so readers enforce it.</summary>
+    public const int MaxTextLength = 64;
+
     public void Write(BinaryWriter w)
     {
         w.Write(Protocol.Version);
-        w.Write(Name);
-        w.Write(MapName);
-        w.Write(Mode);
+        w.Write(Clip(Name));
+        w.Write(Clip(MapName));
+        w.Write(Clip(Mode));
         w.Write((byte)Humans);
         w.Write((byte)Capacity);
         w.Write(Port);
@@ -466,6 +480,14 @@ public sealed record ServerInfo(string Name, string MapName, string Mode, int Hu
     public static ServerInfo? Read(BinaryReader r)
     {
         if (r.ReadInt32() != Protocol.Version) return null;
-        return new ServerInfo(r.ReadString(), r.ReadString(), r.ReadString(), r.ReadByte(), r.ReadByte(), r.ReadInt32());
+        return new ServerInfo(ReadText(r), ReadText(r), ReadText(r), r.ReadByte(), r.ReadByte(), r.ReadInt32());
+    }
+
+    private static string Clip(string text) => text.Length <= MaxTextLength ? text : text[..MaxTextLength];
+
+    private static string ReadText(BinaryReader r)
+    {
+        var text = r.ReadString();
+        return text.Length <= MaxTextLength ? text : throw new InvalidDataException($"Server info text of {text.Length} characters");
     }
 }

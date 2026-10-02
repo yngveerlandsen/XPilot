@@ -58,6 +58,21 @@ public class MatchTests
     }
 
     [Fact]
+    public void ManyJoinsAndLeaves_KeepInputsGoingToTheRightShips()
+    {
+        var match = ServerMatch("arena", 3);
+        for (int i = 0; i < 500; i++) match.RemoveHuman(match.AddHuman($"Churn{i}")!);
+        var pilot = match.AddHuman("Pilot")!;
+        Assert.True(pilot.Id > 500, "ids are never reused, so they keep growing");
+        match.Step();
+        var start = pilot.Position;
+        match.SetInput(pilot, new ShipInput { Thrust = true });
+        for (int i = 0; i < 30; i++) match.Step();
+        Assert.True(Vector2.Distance(start, pilot.Position) > 20f, "the human's input should reach their ship");
+        Assert.Equal(3, match.Bots.Count);
+    }
+
+    [Fact]
     public void AddHuman_KeepsBotCount_WhenThereIsRoom()
     {
         var match = ServerMatch("arena", 3);

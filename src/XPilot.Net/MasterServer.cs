@@ -17,6 +17,13 @@ public sealed class MasterServer : IDisposable
     /// <summary>Registration is unauthenticated, so cap how many servers one address, and everyone, can list.</summary>
     private const int MaxServers = 500;
     private const int MaxPerAddress = 4;
+    /// <summary>
+    /// The reply to a list request is bigger than the request and goes to an address that could be forged, so
+    /// each address gets one reply per interval and replies are capped, to keep the master useless for
+    /// flooding someone else.
+    /// </summary>
+    private const double ListInterval = 2;
+    private const int MaxListPackets = 8;
 
     private sealed class Registration
     {
@@ -29,6 +36,7 @@ public sealed class MasterServer : IDisposable
 
     private readonly NetManager _net;
     private readonly Dictionary<string, Registration> _servers = [];
+    private readonly Dictionary<IPAddress, double> _lastList = [];
     private readonly Stopwatch _clock = Stopwatch.StartNew();
 
     public MasterServer()
@@ -61,6 +69,7 @@ public sealed class MasterServer : IDisposable
             _servers.Remove(id);
             Log?.Invoke($"Server {id} expired");
         }
+        foreach (var address in _lastList.Where(kv => now - kv.Value > ListInterval).Select(kv => kv.Key).ToList()) _lastList.Remove(address);
     }
 
     private void OnMessage(IPEndPoint remote, byte[] data)
@@ -89,6 +98,9 @@ public sealed class MasterServer : IDisposable
                     break;
 
                 case MessageType.MasterListRequest:
+                    double now = _clock.Elapsed.TotalSeconds;
+                    if (_lastList.TryGetValue(remote.Address, out double last) && now - last < ListInterval) return;
+                    _lastList[remote.Address] = now;
                     SendList(remote);
                     break;
             }
@@ -100,7 +112,7 @@ public sealed class MasterServer : IDisposable
 
     private void SendList(IPEndPoint remote)
     {
-        var all = _servers.Values.ToList();
+        var all = _servers.Values.OrderByDescending(s => s.LastSeen).Take(MaxListPackets * EntriesPerPacket).ToList();
         for (int start = 0; start == 0 || start < all.Count; start += EntriesPerPacket)
         {
             var chunk = all.Skip(start).Take(EntriesPerPacket).ToList();

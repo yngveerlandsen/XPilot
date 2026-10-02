@@ -152,5 +152,8 @@ public sealed class MusicPlayer : IDisposable
         return string.Join(' ', parts).ToUpperInvariant();
     }
 
+    /// <summary>Stops playing; <see cref="Update"/> starts another track later.</summary>
+    public void Stop() => StopTrack();
+
     public void Dispose() => StopTrack();
 }

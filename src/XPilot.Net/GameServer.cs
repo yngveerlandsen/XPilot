@@ -37,6 +37,8 @@ public sealed class GameServer
         public int NextSeq;
         public int AckSeq = -1;
         public ShipInput LastInput;
+        /// <summary>When the client joined, so the longest-waiting spectator gets the next free seat.</summary>
+        public long JoinOrder;
     }
 
     /// <summary>Queued inputs beyond this mean the client is running ahead; drop down to <see cref="InputQueueTarget"/>.</summary>
@@ -52,6 +54,7 @@ public sealed class GameServer
     private int _mapIndex;
     private int _matchId;
     private float _intermission = -1f;
+    private long _joins;
     private string _rosterSignature = "";
 
     /// <param name="mapTexts">The map rotation, as map file contents.</param>
@@ -82,7 +85,7 @@ public sealed class GameServer
     public void Connected(IConnection connection, string requestedName)
     {
         var name = UniqueName(Protocol.CleanName(requestedName));
-        var client = new Client(connection, name);
+        var client = new Client(connection, name) { JoinOrder = _joins++ };
         _clients[connection.Id] = client;
         client.Ship = Match.AddHuman(name);
         SendMatchStart(client);
@@ -94,8 +97,25 @@ public sealed class GameServer
     public void Disconnected(IConnection connection)
     {
         if (!_clients.Remove(connection.Id, out var client)) return;
-        if (client.Ship != null) Match.RemoveHuman(client.Ship);
         Announce($"{client.Name} left");
+        if (client.Ship == null) return;
+        Match.RemoveHuman(client.Ship);
+        SeatSpectators();
+    }
+
+    /// <summary>Gives free seats to spectators, longest waiting first. They get a new match start for their ship.</summary>
+    private void SeatSpectators()
+    {
+        foreach (var spectator in _clients.Values.Where(c => c.Ship == null).OrderBy(c => c.JoinOrder).ToList())
+        {
+            spectator.Ship = Match.AddHuman(spectator.Name);
+            if (spectator.Ship == null) return;
+            spectator.Pending.Clear();
+            spectator.LastInput = default;
+            SendMatchStart(spectator);
+            spectator.Connection.Send(RosterMessage.Encode(_matchId, Match.World.Ships), Delivery.Reliable);
+            Announce($"{spectator.Name} joined from the spectators");
+        }
     }
 
     public void Receive(IConnection connection, byte[] data)
@@ -196,7 +216,7 @@ public sealed class GameServer
         _knownBullets.Clear();
         _rosterSignature = "";
 
-        foreach (var client in _clients.Values)
+        foreach (var client in _clients.Values.OrderBy(c => c.JoinOrder))
         {
             client.Ship = match.AddHuman(client.Name);
             client.Pending.Clear();
@@ -299,11 +319,8 @@ public sealed class GameServer
             Ships = world.Ships.Select(ShipState.From).ToList(),
             Balls = world.Balls.Select(BallSnapshot.From).ToList(),
         };
-        foreach (var client in _clients.Values)
-        {
-            snapshot.AckSeq = client.AckSeq;
-            client.Connection.Send(snapshot.Encode(), Delivery.Unreliable);
-        }
+        var encoded = snapshot.Encode();
+        foreach (var client in _clients.Values) client.Connection.Send(Snapshot.WithAckSeq(encoded, client.AckSeq), Delivery.Unreliable);
     }
 
     private void Announce(string text)

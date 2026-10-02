@@ -44,6 +44,7 @@ public sealed class Match : IMatchView
         ["Vega", "Orion", "Lyra", "Draco", "Nova", "Rigel", "Sirius", "Altair", "Deneb", "Mira", "Castor", "Pollux"];
 
     private readonly List<BotController> _bots = [];
+    private readonly Dictionary<int, BotController> _botsByShip = [];
     private readonly List<Ship> _humans = [];
     private readonly Dictionary<int, ShipInput> _humanInputs = [];
     private readonly Random _rng;
@@ -138,16 +139,14 @@ public sealed class Match : IMatchView
     /// <summary>Steps with the inputs last given to <see cref="SetInput"/> for each human.</summary>
     public void Step()
     {
-        int size = 0;
-        foreach (var s in World.Ships) size = Math.Max(size, s.Id + 1);
-        if (_inputs.Length < size) _inputs = new ShipInput[Math.Max(size, _inputs.Length * 2)];
-        Array.Clear(_inputs);
-        foreach (var (id, input) in _humanInputs)
+        var ships = World.Ships;
+        if (_inputs.Length < ships.Count) _inputs = new ShipInput[Math.Max(ships.Count, _inputs.Length * 2)];
+        for (int i = 0; i < ships.Count; i++)
         {
-            if (id < _inputs.Length) _inputs[id] = input;
+            int id = ships[i].Id;
+            _inputs[i] = _botsByShip.TryGetValue(id, out var bot) ? bot.Update() : _humanInputs.GetValueOrDefault(id);
         }
-        foreach (var bot in _bots) _inputs[bot.Ship.Id] = bot.Update();
-        World.Step(_inputs);
+        World.Step(_inputs.AsSpan(0, ships.Count));
     }
 
     /// <summary>
@@ -161,13 +160,16 @@ public sealed class Match : IMatchView
         {
             var bot = BotToRemove(IsTeamMode ? LargerTeam() : Teams.None);
             _bots.Remove(bot);
+            _botsByShip.Remove(bot.Ship.Id);
             World.RemoveShip(bot.Ship);
         }
         while (_bots.Count < wanted)
         {
             var ship = World.AddShip(NextBotName(), true);
             if (IsTeamMode) ship.Team = PickTeam(humansOnly: false);
-            _bots.Add(new BotController(World, Nav, ship, Setup.Difficulty, _rng.Next()));
+            var controller = new BotController(World, Nav, ship, Setup.Difficulty, _rng.Next());
+            _bots.Add(controller);
+            _botsByShip[ship.Id] = controller;
             Joined(ship);
         }
 

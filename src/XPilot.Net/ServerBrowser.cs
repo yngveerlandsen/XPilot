@@ -38,11 +38,13 @@ public sealed class ServerBrowser : IDisposable
     public bool HasMaster => _master != null;
     public IPEndPoint? Master => _master;
 
-    /// <summary>Servers heard from recently, LAN servers first.</summary>
-    public IReadOnlyList<ServerEntry> Servers => _servers.Values
+    /// <summary>Servers heard from recently, LAN servers first. Re-sorted only when the list changes.</summary>
+    public IReadOnlyList<ServerEntry> Servers => _sorted ??= _servers.Values
         .OrderByDescending(s => s.OnLan)
         .ThenBy(s => s.Info.Name, StringComparer.OrdinalIgnoreCase)
         .ToList();
+
+    private List<ServerEntry>? _sorted;
 
     public void Refresh()
     {
@@ -66,6 +68,7 @@ public sealed class ServerBrowser : IDisposable
         foreach (var key in _servers.Where(kv => now - kv.Value.LastSeen > Expiry).Select(kv => kv.Key).ToList())
         {
             _servers.Remove(key);
+            _sorted = null;
         }
     }
 
@@ -79,6 +82,7 @@ public sealed class ServerBrowser : IDisposable
             {
                 var endPoint = new IPEndPoint(remote.Address, info.Port);
                 _servers[endPoint.ToString()] = new ServerEntry(endPoint, info, true, null) { LastSeen = now };
+                _sorted = null;
             }
             else if (type == MessageType.MasterListResponse)
             {
@@ -93,6 +97,7 @@ public sealed class ServerBrowser : IDisposable
                     // A server already found on the LAN is better reached directly.
                     if (_servers.Values.Any(s => s.OnLan && s.Info.Name == entryInfo.Name && s.EndPoint.Port == endPoint.Port)) continue;
                     _servers[endPoint.ToString()] = new ServerEntry(endPoint, entryInfo, false, id) { LastSeen = now };
+                    _sorted = null;
                 }
             }
         }

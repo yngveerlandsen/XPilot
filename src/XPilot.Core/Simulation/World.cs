@@ -70,7 +70,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         Rules.Initialize(this);
     }
 
-    /// <param name="inputs">Inputs indexed by ship id. Missing entries mean "no input".</param>
+    /// <param name="inputs">One input per ship, in the order of <see cref="Ships"/>. Missing entries mean "no input".</param>
     public void Step(ReadOnlySpan<ShipInput> inputs)
     {
         _events.Clear();
@@ -85,9 +85,9 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         foreach (var b in Balls) b.PrevPosition = b.Position;
 
         bool locked = Rules.ControlsLocked;
-        foreach (var s in Ships)
+        for (int i = 0; i < Ships.Count; i++)
         {
-            UpdateShip(s, s.Id < inputs.Length ? inputs[s.Id] : default, dt, locked);
+            UpdateShip(Ships[i], i < inputs.Length ? inputs[i] : default, dt, locked);
         }
 
         ResolveShipCollisions();
