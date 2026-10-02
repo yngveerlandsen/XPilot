@@ -20,8 +20,9 @@ public struct ShipInput
 public sealed class Ship(int id, string name, bool isBot, int colorIndex)
 {
     public int Id { get; } = id;
-    public string Name { get; } = name;
-    public bool IsBot { get; } = isBot;
+    public string Name { get; set; } = name;
+    /// <summary>Settable so a network client can fill in a ship it heard about before learning who flies it.</summary>
+    public bool IsBot { get; set; } = isBot;
     public int ColorIndex { get; } = colorIndex;
     /// <summary><see cref="Maps.Teams.None"/> in free-for-all modes.</summary>
     public int Team = Maps.Teams.None;
@@ -63,6 +64,8 @@ public sealed class Ship(int id, string name, bool isBot, int colorIndex)
 
 public sealed class Bullet
 {
+    /// <summary>Unique within a world, so a network client can track bullets it was told about.</summary>
+    public int Id;
     public Vector2 Position;
     public Vector2 PrevPosition;
     public Vector2 Velocity;

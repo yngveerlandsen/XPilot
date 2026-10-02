@@ -79,6 +79,10 @@ public sealed class DogfightRules(int scoreLimit = 10, float timeLimit = 300f) :
         .ThenBy(s => s.Id)
         .ToList();
 
+    public void WriteState(BinaryWriter writer) => writer.Write(IsOver);
+
+    public void ReadState(BinaryReader reader) => IsOver = reader.ReadBoolean();
+
     private void End(World world)
     {
         IsOver = true;

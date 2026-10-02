@@ -121,6 +121,33 @@ public sealed class RaceRules(int laps) : IGameRules
     {
     }
 
+    public void OnShipJoined(World world, Ship ship)
+    {
+        ship.NextCheckpoint = 0;
+        ship.LastCheckpoint = -1;
+        ship.Lap = 0;
+        ship.LapStartTime = MathF.Max(world.Time, CountdownSeconds);
+    }
+
+    public void WriteState(BinaryWriter writer)
+    {
+        writer.Write(IsOver);
+        writer.Write(ControlsLocked);
+        writer.Write(_finishedCount);
+        writer.Write(_firstFinishTime ?? -1f);
+        writer.Write(_lastCountdown);
+    }
+
+    public void ReadState(BinaryReader reader)
+    {
+        IsOver = reader.ReadBoolean();
+        ControlsLocked = reader.ReadBoolean();
+        _finishedCount = reader.ReadInt32();
+        float first = reader.ReadSingle();
+        _firstFinishTime = first >= 0f ? first : null;
+        _lastCountdown = reader.ReadInt32();
+    }
+
     public void Respawn(World world, Ship ship)
     {
         var map = world.Map;
