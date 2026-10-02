@@ -68,9 +68,26 @@ public class SettingsTests
         Assert.Equal(effective, new Settings { MasterServer = stored }.EffectiveMasterServer);
 
     [Fact]
-    public void OlderSettingsFiles_GetTheDefaultMasterServer_ButDontListHostedGames()
+    public void OlderSettingsFiles_WithoutAMasterServer_StayLanOnly()
     {
-        var settings = JsonSerializer.Deserialize<Settings>("""{ "MasterServer": null, "PlayerName": "Old" }""")!;
+        var settings = Settings.Parse("""{ "MasterServer": null, "PlayerName": "Old" }""");
+        Assert.Null(settings.EffectiveMasterServer);
+        Assert.False(settings.ListHostedGames);
+        Assert.Equal(Settings.CurrentVersion, settings.Version);
+    }
+
+    [Fact]
+    public void OlderSettingsFiles_WithTheirOwnMasterServer_KeepListingHostedGames()
+    {
+        var settings = Settings.Parse("""{ "MasterServer": "games.example.com" }""");
+        Assert.Equal("games.example.com", settings.EffectiveMasterServer);
+        Assert.True(settings.ListHostedGames);
+    }
+
+    [Fact]
+    public void CurrentSettingsFiles_AreLeftAsTheyAre()
+    {
+        var settings = Settings.Parse($$"""{ "Version": {{Settings.CurrentVersion}}, "MasterServer": null }""");
         Assert.Equal(Settings.DefaultMasterServer, settings.EffectiveMasterServer);
         Assert.False(settings.ListHostedGames);
     }

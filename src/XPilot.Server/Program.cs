@@ -168,6 +168,7 @@ else
 var server = new GameServer(options, rotation.Select(MapLoader.ReadText));
 server.Log += Log;
 using var host = new ServerHost(server);
+host.Log += Log;
 if (!host.Start())
 {
     Console.Error.WriteLine($"Could not open UDP port {options.Port}. Is another server running?");

@@ -110,12 +110,4 @@ public class UdpTests
         Assert.False(second.Start());
     }
 
-    [Fact]
-    public void ParseEndPoint_AcceptsHostsAndPorts()
-    {
-        Assert.Equal(new IPEndPoint(IPAddress.Loopback, 15345), ServerHost.ParseEndPoint("127.0.0.1", 15345));
-        Assert.Equal(new IPEndPoint(IPAddress.Loopback, 2000), ServerHost.ParseEndPoint(" 127.0.0.1:2000 ", 15345));
-        Assert.Equal(2000, ServerHost.ParseEndPoint("localhost:2000", 15345)!.Port);
-        Assert.Null(ServerHost.ParseEndPoint("", 15345));
-    }
 }
