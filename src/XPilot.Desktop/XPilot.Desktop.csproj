@@ -18,7 +18,7 @@
     <EmbeddedResource Include="Icon.bmp" LogicalName="Icon.bmp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\maps\*.xpm" LinkBase="maps" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\maps\**\*" LinkBase="maps" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\music\*.ogg" LinkBase="music" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>

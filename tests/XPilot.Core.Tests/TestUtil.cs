@@ -37,9 +37,13 @@ internal static class TestUtil
         }
     }
 
-    public static IEnumerable<string> MapFiles => Directory.GetFiles(MapsDirectory, "*.xpm");
+    /// <summary>Every shipped map, including the classic XPilot ones.</summary>
+    public static IEnumerable<string> MapFiles => MapLoader.FindMaps(MapsDirectory);
 
-    public static Map LoadMap(string name) => MapLoader.Load(Path.Combine(MapsDirectory, name + ".xpm"));
+    /// <summary>The maps made for this game, which the bot tests are tuned for.</summary>
+    public static IEnumerable<string> OwnMapFiles => MapFiles.Where(f => Path.GetExtension(f) == ".xpm");
+
+    public static Map LoadMap(string name, string extension = ".xpm") => MapLoader.Load(Path.Combine(MapsDirectory, name + extension));
 
     /// <summary>A started dogfight world on the given map with <paramref name="ships"/> ships.</summary>
     public static World DogfightWorld(string mapText = OpenBox, int ships = 1, GameConfig? config = null)

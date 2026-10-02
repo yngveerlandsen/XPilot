@@ -180,7 +180,7 @@ public sealed class MainMenuScreen : Screen
         var s = Game.Settings;
         var maps = MapsForMode;
         int first = Math.Max(0, maps.ToList().IndexOf(map));
-        var rotation = maps.Skip(first).Concat(maps.Take(first)).Where(m => m.SourcePath != null).Select(m => File.ReadAllText(m.SourcePath!));
+        var rotation = maps.Skip(first).Concat(maps.Take(first)).Where(m => m.SourcePath != null).Select(m => MapLoader.ReadText(m.SourcePath!));
 
         var options = new ServerOptions
         {
@@ -223,6 +223,9 @@ public sealed class MainMenuScreen : Screen
         }
         s.Save();
     }
+
+    /// <summary>Some classic map names are whole sentences; keep them to one line.</summary>
+    private static string Shorten(string name) => name.Length <= 30 ? name : name[..29].TrimEnd() + ".";
 
     private void SelectRememberedMap()
     {
@@ -267,7 +270,7 @@ public sealed class MainMenuScreen : Screen
             var (label, value) = item switch
             {
                 Item.Mode => ("MODE", ModeName(_mode)),
-                Item.Map => ("MAP", CurrentMap?.Name.ToUpperInvariant() ?? "NONE"),
+                Item.Map => ("MAP", CurrentMap is { } m ? Shorten(m.Name).ToUpperInvariant() : "NONE"),
                 Item.Bots => ("BOTS", _bots.ToString()),
                 Item.Difficulty => ("SKILL", _difficulty.ToString().ToUpperInvariant()),
                 Item.Name => ("NAME", _editingName != null

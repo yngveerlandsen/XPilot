@@ -104,7 +104,7 @@ if (!Directory.Exists(mapsDir))
     return 1;
 }
 var available = new List<(string Name, string File, Map Map)>();
-foreach (var file in Directory.GetFiles(mapsDir, "*.xpm").Order())
+foreach (var file in MapLoader.FindMaps(mapsDir))
 {
     try
     {
@@ -147,7 +147,7 @@ else
     }
 }
 
-var server = new GameServer(options, rotation.Select(File.ReadAllText));
+var server = new GameServer(options, rotation.Select(MapLoader.ReadText));
 server.Log += Log;
 using var host = new ServerHost(server);
 if (!host.Start())

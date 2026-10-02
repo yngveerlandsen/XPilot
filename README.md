@@ -101,6 +101,18 @@ inputs the server hasn't seen yet and smooths out the difference. Bullets fly in
 simulate them from where they were fired rather than receiving their positions. The tests in
 `tests/XPilot.Net.Tests` run full games over a simulated network with latency, jitter and packet loss.
 
+## Maps
+
+`maps/` holds this game's own maps (`.xpm`) plus:
+
+- **Grand Tour** (`grand-tour.xp`): a huge race circuit, about three minutes a lap, with a chicane, a
+  switchback climb, gravity wells on the top straight and a slalom home.
+- **Classic XPilot maps** (`maps/classic/`): 22 maps from the original game, among them Blood's Music, The
+  Globe, Tourmination, Teamball and Grand Prix II. They are loaded directly in XPilot's own `.xp` format; see
+  [maps/classic/README.md](maps/classic/README.md) for authors, license (GPL-2.0) and what carries over.
+
+Drop more `.xpm` or `.xp` files anywhere under `maps/` and they appear in the menu.
+
 ## Music
 
 Any `.ogg` files in `music/` are played in random order, without repeating a track until all have played.
