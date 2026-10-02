@@ -1,16 +1,18 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
 using XPilot.Core;
 using XPilot.Core.AI;
 using XPilot.Core.Maps;
 using XPilot.Desktop.Graphics;
 using XPilot.Desktop.Input;
+using XPilot.Net;
 
 namespace XPilot.Desktop.Screens;
 
 public sealed class MainMenuScreen : Screen
 {
-    private enum Item { Mode, Map, Bots, Difficulty, Controls, Start, Quit }
+    private enum Item { Mode, Map, Bots, Difficulty, Controls, Name, Start, Host, Join, Quit }
 
     private static readonly Item[] Items = Enum.GetValues<Item>();
 
@@ -21,6 +23,9 @@ public sealed class MainMenuScreen : Screen
     private BotDifficulty _difficulty;
     private float _time;
     private Vector2 _drift;
+    /// <summary>The name being typed, or null when not editing it.</summary>
+    private string? _editingName;
+    private string? _message;
 
     public MainMenuScreen(XPilotGame game) : base(game)
     {
@@ -50,6 +55,12 @@ public sealed class MainMenuScreen : Screen
         _time += dt;
         _drift += new Vector2(18f, 6f) * dt;
 
+        if (_editingName != null)
+        {
+            EditName();
+            return;
+        }
+
         if (Input.MenuUp) Move(-1);
         if (Input.MenuDown) Move(1);
         if (Input.MenuLeft) Change(-1);
@@ -58,8 +69,27 @@ public sealed class MainMenuScreen : Screen
         if (Input.MenuBack) Game.Exit();
     }
 
+    private void EditName()
+    {
+        if (Input.WasPressed(Keys.Escape))
+        {
+            _editingName = null;
+            return;
+        }
+        if (Input.WasPressed(Keys.Enter))
+        {
+            Game.Settings.PlayerName = Protocol.CleanName(_editingName);
+            Game.Settings.Save();
+            _editingName = null;
+            Sounds.Play("select", 0.6f, 0.3f);
+            return;
+        }
+        _editingName = Input.EditText(_editingName!, Protocol.MaxNameLength);
+    }
+
     private void Move(int delta)
     {
+        _message = null;
         _selected = (_selected + delta + Items.Length) % Items.Length;
         Sounds.Play("select", 0.6f);
     }
@@ -101,6 +131,16 @@ public sealed class MainMenuScreen : Screen
             case Item.Start:
                 StartMatch();
                 break;
+            case Item.Host:
+                HostGame();
+                break;
+            case Item.Join:
+                Sounds.Play("select", 0.6f);
+                Game.SetScreen(new JoinScreen(Game));
+                break;
+            case Item.Name:
+                _editingName = Game.Settings.PlayerName;
+                break;
             case Item.Quit:
                 Game.Exit();
                 break;
@@ -114,6 +154,56 @@ public sealed class MainMenuScreen : Screen
     {
         var map = CurrentMap;
         if (map == null) return;
+        RememberChoices(map);
+        Sounds.Play("go", 0.7f);
+        Game.SetScreen(new PlayScreen(Game, new MatchSetup
+        {
+            Map = map,
+            BotCount = _bots,
+            Difficulty = _difficulty,
+            PlayerName = Game.Settings.PlayerName,
+        }));
+    }
+
+    /// <summary>
+    /// Starts a server in this process with the menu's mode, map and bots, and joins it. The rotation is every
+    /// map of the mode, starting with the chosen one.
+    /// </summary>
+    private void HostGame()
+    {
+        var map = CurrentMap;
+        if (map == null) return;
+        RememberChoices(map);
+        var s = Game.Settings;
+        var maps = MapsForMode;
+        int first = Math.Max(0, maps.ToList().IndexOf(map));
+        var rotation = maps.Skip(first).Concat(maps.Take(first)).Where(m => m.SourcePath != null).Select(m => File.ReadAllText(m.SourcePath!));
+
+        var options = new ServerOptions
+        {
+            Name = $"{s.PlayerName}'s game",
+            Port = s.HostPort,
+            BotCount = _bots,
+            Difficulty = _difficulty,
+            MasterServer = s.MasterServer,
+        };
+        var host = new ServerHost(new GameServer(options, rotation));
+        if (!host.Start())
+        {
+            host.Dispose();
+            _message = $"COULD NOT OPEN UDP PORT {s.HostPort} - IS ANOTHER SERVER RUNNING?";
+            Sounds.Play("bounce", 0.6f);
+            return;
+        }
+
+        var connection = new ClientConnection(s.PlayerName);
+        connection.Connect(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, host.Port));
+        Sounds.Play("go", 0.7f);
+        Game.SetScreen(new PlayScreen(Game, new NetworkSession(connection, host)));
+    }
+
+    private void RememberChoices(Map map)
+    {
         var s = Game.Settings;
         s.Mode = _mode.ToString();
         s.Bots = _bots;
@@ -125,15 +215,6 @@ public sealed class MainMenuScreen : Screen
             default: s.LastDogfightMap = map.Name; break;
         }
         s.Save();
-
-        Sounds.Play("go", 0.7f);
-        Game.SetScreen(new PlayScreen(Game, new MatchSetup
-        {
-            Map = map,
-            BotCount = _bots,
-            Difficulty = _difficulty,
-            PlayerName = s.PlayerName,
-        }));
     }
 
     private void SelectRememberedMap()
@@ -168,13 +249,13 @@ public sealed class MainMenuScreen : Screen
         VectorFont.Draw(pb, "XPILOT", new Vector2(cx, 70 * s), 72f * s, Palette.Accent * glow, TextAlign.Center, 5f * s, 1.2f);
         VectorFont.Draw(pb, "A NEW FLIGHT", new Vector2(cx, 160 * s), 14f * s, Palette.TextDim, TextAlign.Center);
 
-        float y = 220 * s;
+        float y = 200 * s;
         for (int i = 0; i < Items.Length; i++)
         {
             var item = Items[i];
             bool selected = i == _selected;
             var color = selected ? Palette.Text : Palette.TextDim * 0.8f;
-            float size = (item is Item.Start ? 22f : 16f) * s;
+            float size = (item is Item.Start or Item.Host or Item.Join ? 20f : 16f) * s;
             if (item == Item.Start) y += 14 * s;
             var (label, value) = item switch
             {
@@ -183,20 +264,33 @@ public sealed class MainMenuScreen : Screen
                 Item.Bots => ("BOTS", _bots.ToString()),
                 Item.Difficulty => ("SKILL", _difficulty.ToString().ToUpperInvariant()),
                 Item.Controls => ("CONTROLS", Game.Settings.ControlPreset.ToUpperInvariant()),
-                Item.Start => ("START " + ModeName(_mode), null),
+                Item.Name => ("NAME", _editingName != null
+                    ? _editingName + (((int)(_time * 3f) & 1) == 0 ? "_" : " ")
+                    : Game.Settings.PlayerName),
+                Item.Start => ("PLAY " + ModeName(_mode) + " VS BOTS", null),
+                Item.Host => ("HOST " + ModeName(_mode) + " GAME", null),
+                Item.Join => ("JOIN NETWORK GAME", null),
                 _ => ("QUIT", (string?)null),
             };
             if (selected) color *= 0.85f + 0.15f * MathF.Sin(_time * 8f);
             if (value != null)
             {
                 VectorFont.Draw(pb, label, new Vector2(cx - 24 * s, y), size, color, TextAlign.Right);
-                VectorFont.Draw(pb, selected ? $"< {value} >" : value, new Vector2(cx + 24 * s, y), size, color);
+                bool arrows = selected && item != Item.Name;
+                VectorFont.Draw(pb, arrows ? $"< {value} >" : value, new Vector2(cx + 24 * s, y), size,
+                    item == Item.Name && _editingName != null ? Palette.Accent : color);
             }
             else
             {
                 VectorFont.Draw(pb, selected ? $">  {label}  <" : label, new Vector2(cx, y), size, color, TextAlign.Center);
             }
-            y += size + 18 * s;
+            y += size + 14 * s;
+        }
+
+        if (_message != null)
+        {
+            VectorFont.Draw(pb, _message, new Vector2(cx, y + 4 * s), 10f * s, Palette.Warning, TextAlign.Center);
+            y += 20 * s;
         }
 
         if (CurrentMap is { } map)
@@ -212,7 +306,7 @@ public sealed class MainMenuScreen : Screen
         VectorFont.Draw(pb, controls, new Vector2(cx, hy), 10f * s, Palette.TextDim, TextAlign.Center);
         VectorFont.Draw(pb, "TAB SCORES   ESC PAUSE   F11 FULLSCREEN   GAMEPAD SUPPORTED",
             new Vector2(cx, hy + 22 * s), 10f * s, Palette.TextDim * 0.8f, TextAlign.Center);
-        VectorFont.Draw(pb, "ARROWS CHOOSE   ENTER START   ESC QUIT",
+        VectorFont.Draw(pb, _editingName != null ? "TYPE YOUR NAME   ENTER OK   ESC CANCEL" : "ARROWS CHOOSE   ENTER START   ESC QUIT",
             new Vector2(cx, hy + 50 * s), 10f * s, Palette.TextDim * 0.6f, TextAlign.Center);
 
         if (Game.Maps.Errors.Count > 0)

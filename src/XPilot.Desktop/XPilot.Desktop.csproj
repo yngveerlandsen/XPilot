@@ -24,6 +24,6 @@
     <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\XPilot.Core\XPilot.Core.csproj" />
+    <ProjectReference Include="..\XPilot.Net\XPilot.Net.csproj" />
   </ItemGroup>
 </Project>

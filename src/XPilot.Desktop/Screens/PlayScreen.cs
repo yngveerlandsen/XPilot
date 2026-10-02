@@ -7,23 +7,26 @@ using XPilot.Core.Rules;
 using XPilot.Core.Simulation;
 using XPilot.Desktop.Graphics;
 using XPilot.Desktop.Input;
+using XPilot.Net;
 
 namespace XPilot.Desktop.Screens;
 
+/// <summary>Plays a local match or a network game; most of the screen doesn't care which.</summary>
 public sealed class PlayScreen : Screen
 {
-    private static readonly string[] PauseItems = ["RESUME", "RESTART", "MAIN MENU"];
+    private enum PauseItem { Resume, Restart, SwitchTeam, MainMenu, Leave }
 
-    private readonly MatchSetup _setup;
-    private readonly Match _match;
-    private readonly WorldRenderer _renderer;
-    private readonly Hud _hud;
+    private readonly MatchSetup? _setup;
+    private readonly IGameSession _session;
+    private readonly NetworkSession? _net;
     private readonly Camera _camera = new();
     private readonly ParticleSystem _particles = new();
     private readonly InputBindings _bindings;
     private readonly Random _rng = new();
 
-    private float _accumulator;
+    private WorldRenderer? _renderer;
+    private Hud? _hud;
+    private int _matchCount = -1;
     private float _time;
     private float _overTimer;
     private float _shake;
@@ -31,113 +34,227 @@ public sealed class PlayScreen : Screen
     private Vector2 _starCamera;
     private bool _paused;
     private int _pauseIndex;
+    private string? _chatInput;
+    private bool _leaving;
 
-    public PlayScreen(XPilotGame game, MatchSetup setup) : base(game)
+    /// <summary>A local match against bots.</summary>
+    public PlayScreen(XPilotGame game, MatchSetup setup) : this(game, new LocalSession(setup))
     {
         _setup = setup;
-        _match = new Match(setup);
-        _renderer = new WorldRenderer(setup.Map);
-        _hud = new Hud(setup.Map);
-        _bindings = InputBindings.FromSettings(game.Settings);
+    }
 
-        var focus = _match.Player?.Position ?? setup.Map.Bases[0];
+    public PlayScreen(XPilotGame game, IGameSession session) : base(game)
+    {
+        _session = session;
+        _net = session as NetworkSession;
+        _bindings = InputBindings.FromSettings(game.Settings);
+        if (!session.IsNetwork) BeginMatch();
+    }
+
+    private World World => _session.World;
+    private Map Map => World.Map;
+
+    private PauseItem[] PauseItems => _net == null
+        ? [PauseItem.Resume, PauseItem.Restart, PauseItem.MainMenu]
+        : World.Map.Mode == GameModeKind.Ball && _session.Player != null
+            ? [PauseItem.Resume, PauseItem.SwitchTeam, PauseItem.Leave]
+            : [PauseItem.Resume, PauseItem.Leave];
+
+    private static string Label(PauseItem item) => item switch
+    {
+        PauseItem.Resume => "RESUME",
+        PauseItem.Restart => "RESTART",
+        PauseItem.SwitchTeam => "SWITCH TEAM",
+        PauseItem.MainMenu => "MAIN MENU",
+        _ => "LEAVE GAME",
+    };
+
+    public override void Enter() => Sounds.StopAll();
+
+    public override void Leave()
+    {
+        _session.Dispose();
+        Sounds.StopAll();
+    }
+
+    /// <summary>Sets up the renderer and HUD for the current map. Network games call this for every new map.</summary>
+    private void BeginMatch()
+    {
+        _renderer = new WorldRenderer(Map);
+        _hud = new Hud(Map);
+        _particles.Clear();
+        _overTimer = 0f;
+        var focus = _session.Player?.Position ?? Map.Bases[0];
         _camera.Position = focus.ToXna();
         _starCamera = _camera.Position;
 
-        if (_match.World.Rules is DogfightRules dogfight)
+        if (_net != null)
+        {
+            _hud.ShowCenter(Map.Name.ToUpperInvariant(), Palette.Accent, 3f,
+                _session.Player == null ? "SPECTATING - SERVER FULL" : $"ON {_net.Client.ServerName.ToUpperInvariant()}");
+        }
+        if (World.Rules is DogfightRules dogfight && _net == null)
         {
             _hud.ShowCenter("DOGFIGHT", Palette.Accent, 2.5f, $"FIRST TO {dogfight.ScoreLimit} KILLS WINS");
         }
-        else if (_match.World.Rules is BallRules ball && _match.Player is { } player)
+        else if (World.Rules is BallRules ball && _session.Player is { } player)
         {
             _hud.ShowCenter($"{Teams.Name(player.Team).ToUpperInvariant()} TEAM", Palette.Team(player.Team), 3.5f,
                 $"{_bindings.Describe(GameAction.Grab)} GRABS THE ENEMY BALL - FIRST TO {ball.CaptureLimit}");
         }
-        HandleEvents();
+        HandleEvents(_session.TakeEvents());
     }
-
-    private Map Map => _match.World.Map;
-    private float Alpha => Math.Clamp(_accumulator / GameConfig.Dt, 0f, 1f);
-
-    public override void Enter() => Sounds.StopAll();
 
     public override void Update(float dt)
     {
         _time += dt;
-        if (Input.Pause)
+        if (_leaving) return;
+
+        if (_net is { Connection.Status: ConnectionStatus.Disconnected })
+        {
+            if (Input.MenuSelect || Input.MenuBack) ReturnToMenu();
+            return;
+        }
+
+        if (_net is { Client.IsReady: false })
+        {
+            if (Input.MenuBack) ReturnToMenu();
+            else _session.Update(dt, default);
+            return;
+        }
+
+        if (!UpdateChat() && Input.Pause)
         {
             _paused = !_paused;
             _pauseIndex = 0;
             Sounds.Play("select", 0.6f);
         }
-        if (_paused)
+        if (_paused && _net == null)
         {
             Sounds.SetThrust(0f, 1f);
             UpdatePauseMenu();
             return;
         }
 
-        var input = _bindings.Read(Input);
-        _accumulator += MathF.Min(dt, 0.1f);
-        while (_accumulator >= GameConfig.Dt)
+        var input = _paused || _chatInput != null ? default : _bindings.Read(Input);
+        _session.Update(dt, input);
+        if (_paused) UpdatePauseMenu();
+        if (_leaving) return;
+
+        if (_net != null)
         {
-            _match.Step(input);
-            HandleEvents();
-            _accumulator -= GameConfig.Dt;
+            if (!_net.Client.IsReady) return;
+            if (_net.Client.MatchCount != _matchCount)
+            {
+                _matchCount = _net.Client.MatchCount;
+                BeginMatch();
+            }
+            foreach (var line in _net.Client.TakeChat())
+            {
+                if (line.From.Length == 0) _hud!.AddChat(line.Text.ToUpperInvariant(), Palette.TextDim);
+                else _hud!.AddChat($"{line.From}: {line.Text}", line.Team == Teams.None ? Palette.Text : Palette.Team(line.Team));
+            }
+            var c = _net.Client;
+            _hud!.StatusText = $"PING {c.RoundTripMs} MS" + (c.IsSpectating ? "   SPECTATING" : "") +
+                               (_net.Host != null ? $"   HOSTING ON PORT {_net.Host.Port}" : "");
         }
+
+        HandleEvents(_session.TakeEvents());
+        var hud = _hud!;
+        hud.ChatInput = _chatInput;
 
         EmitThrustParticles(dt);
         _particles.Update(dt, p => Map.WrapPosition(p.ToNum()).ToXna());
         UpdateCamera(dt);
-        _hud.Update(dt);
+        hud.Update(dt);
 
-        var player = _match.Player;
-        Sounds.SetThrust(player is { Alive: true, Thrusting: true } ? 1f : 0f, dt);
+        var player = _session.Player;
+        Sounds.SetThrust(player is { Alive: true, Thrusting: true } && !_paused ? 1f : 0f, dt);
 
-        var rules = _match.World.Rules;
-        if (rules.IsOver)
+        if (World.Rules.IsOver)
         {
             _overTimer += dt;
-            if (_overTimer > 4f || (_overTimer > 0.75f && Input.MenuSelect)) ShowResults();
+            if (_net == null && (_overTimer > 4f || (_overTimer > 0.75f && Input.MenuSelect))) ShowResults();
         }
-        else if (player is { Finished: true } && Input.WasPressed(Keys.Enter))
+        else if (_net == null && player is { Finished: true } && Input.WasPressed(Keys.Enter))
         {
             ShowResults();
         }
     }
 
+    /// <summary>T opens the chat line in network games. Returns true if this frame's keys went to the chat.</summary>
+    private bool UpdateChat()
+    {
+        if (_net == null) return false;
+        if (_chatInput == null)
+        {
+            if (_paused || !Input.WasPressed(Keys.T)) return false;
+            // The "t" that opened the chat is in this frame's typing; start empty.
+            _chatInput = "";
+            return true;
+        }
+
+        if (Input.WasPressed(Keys.Escape))
+        {
+            _chatInput = null;
+            return true;
+        }
+        if (Input.WasPressed(Keys.Enter))
+        {
+            _net.Client.SendChat(_chatInput);
+            _chatInput = null;
+            return true;
+        }
+        _chatInput = Input.EditText(_chatInput, Protocol.MaxChatLength);
+        return true;
+    }
+
     private void ShowResults()
     {
+        if (_session is not LocalSession local || _setup == null) return;
         Sounds.StopAll();
-        Game.SetScreen(new ResultsScreen(Game, _match, _setup));
+        Game.SetScreen(new ResultsScreen(Game, local.Match, _setup));
+    }
+
+    private void ReturnToMenu()
+    {
+        _leaving = true;
+        Game.SetScreen(new MainMenuScreen(Game));
     }
 
     private void UpdatePauseMenu()
     {
-        if (Input.MenuUp) _pauseIndex = (_pauseIndex + PauseItems.Length - 1) % PauseItems.Length;
-        if (Input.MenuDown) _pauseIndex = (_pauseIndex + 1) % PauseItems.Length;
+        var items = PauseItems;
+        if (Input.MenuUp) _pauseIndex = (_pauseIndex + items.Length - 1) % items.Length;
+        if (Input.MenuDown) _pauseIndex = (_pauseIndex + 1) % items.Length;
+        _pauseIndex = Math.Clamp(_pauseIndex, 0, items.Length - 1);
         if (!Input.MenuSelect) return;
-        switch (_pauseIndex)
+        switch (items[_pauseIndex])
         {
-            case 0:
+            case PauseItem.Resume:
                 _paused = false;
                 break;
-            case 1:
+            case PauseItem.Restart when _setup != null:
+                _leaving = true;
                 Game.SetScreen(new PlayScreen(Game, _setup));
                 break;
+            case PauseItem.SwitchTeam:
+                _net?.Client.RequestTeamSwitch();
+                _paused = false;
+                break;
             default:
-                Game.SetScreen(new MainMenuScreen(Game));
+                ReturnToMenu();
                 break;
         }
     }
 
     private void UpdateCamera(float dt)
     {
-        // Follow the player, or the first bot when spectating.
-        var player = _match.Player ?? _match.World.Ships.FirstOrDefault();
+        // Follow the player, or the first ship flying when spectating.
+        var player = _session.Player ?? World.Ships.FirstOrDefault(s => s.Alive) ?? World.Ships.FirstOrDefault();
         if (player is { Alive: true })
         {
-            var pos = player.PrevPosition + Map.Delta(player.PrevPosition, player.Position) * Alpha;
+            var pos = player.PrevPosition + Map.Delta(player.PrevPosition, player.Position) * _session.Alpha;
             var lead = MathUtil.ClampLength(player.Velocity * 0.25f, 160f);
             var target = pos + lead;
             var delta = Map.Delta(_camera.Position.ToNum(), target).ToXna();
@@ -158,7 +275,7 @@ public sealed class PlayScreen : Screen
         int count = (int)_thrustSpawn;
         _thrustSpawn -= count;
         if (count == 0) return;
-        foreach (var s in _match.World.Ships)
+        foreach (var s in World.Ships)
         {
             if (!s.Alive || !s.Thrusting) continue;
             var dir = MathUtil.FromAngle(s.Heading).ToXna();
@@ -173,11 +290,12 @@ public sealed class PlayScreen : Screen
         }
     }
 
-    private void HandleEvents()
+    private void HandleEvents(List<GameEvent> events)
     {
-        var world = _match.World;
-        var player = _match.Player;
-        foreach (var e in world.Events)
+        var hud = _hud!;
+        var world = World;
+        var player = _session.Player;
+        foreach (var e in events)
         {
             var pos = e.Position.ToXna();
             var ship = world.GetShip(e.ShipId);
@@ -194,18 +312,18 @@ public sealed class PlayScreen : Screen
                 case GameEventType.ShipDestroyed when ship != null:
                     Explode(pos, e.Velocity.ToXna(), Palette.Ship(ship));
                     Sounds.Play("explosion", MathF.Max(volume, isPlayer ? 1f : 0f), (float)_rng.NextDouble() * 0.2f - 0.1f, pan);
-                    _hud.AddFeed(DeathMessage(ship, other, e.Cause), other != null && other != ship ? Palette.Ship(other) : Palette.TextDim);
+                    hud.AddFeed(DeathMessage(ship, other, e.Cause), other != null && other != ship ? Palette.Ship(other) : Palette.TextDim);
                     if (isPlayer)
                     {
                         _shake = 12f;
                         if (world.Rules.Mode != GameModeKind.Race)
                         {
-                            _hud.ShowCenter("DESTROYED", Palette.Warning, 1.6f, other != null && other != ship ? $"BY {other.Name.ToUpperInvariant()}" : null);
+                            hud.ShowCenter("DESTROYED", Palette.Warning, 1.6f, other != null && other != ship ? $"BY {other.Name.ToUpperInvariant()}" : null);
                         }
                     }
                     else if (other != null && other == player)
                     {
-                        _hud.ShowCenter("KILL", Palette.Ship(ship), 0.8f, ship.Name.ToUpperInvariant());
+                        hud.ShowCenter("KILL", Palette.Ship(ship), 0.8f, ship.Name.ToUpperInvariant());
                     }
                     break;
 
@@ -234,43 +352,43 @@ public sealed class PlayScreen : Screen
 
                 case GameEventType.LapCompleted when isPlayer && ship != null && world.Rules is RaceRules race && ship.Lap < race.Laps:
                     Sounds.Play("lap", 0.8f);
-                    _hud.ShowCenter(ship.Lap + 1 == race.Laps ? "FINAL LAP" : $"LAP {ship.Lap + 1}", Palette.Checkpoint, 2f,
+                    hud.ShowCenter(ship.Lap + 1 == race.Laps ? "FINAL LAP" : $"LAP {ship.Lap + 1}", Palette.Checkpoint, 2f,
                         $"LAP TIME {Hud.FormatTime(e.Value)}");
                     break;
 
                 case GameEventType.ShipFinished when ship != null:
-                    _hud.AddFeed($"{ship.Name} FINISHED #{ship.Place}", Palette.Ship(ship));
+                    hud.AddFeed($"{ship.Name} FINISHED #{(int)e.Value}", Palette.Ship(ship));
                     if (isPlayer)
                     {
                         Sounds.Play("lap", 1f);
-                        _hud.ShowCenter(ship.Place == 1 ? "YOU WIN!" : $"PLACE {ship.Place}", Palette.Checkpoint, 5f,
-                            $"TIME {Hud.FormatTime(ship.FinishTime)}   ENTER FOR RESULTS");
+                        hud.ShowCenter((int)e.Value == 1 ? "YOU WIN!" : $"PLACE {(int)e.Value}", Palette.Checkpoint, 5f,
+                            $"TIME {Hud.FormatTime(ship.FinishTime)}" + (_net == null ? "   ENTER FOR RESULTS" : ""));
                     }
                     break;
 
                 case GameEventType.CountdownTick:
                     Sounds.Play("beep", 0.7f);
-                    _hud.ShowCenter(((int)e.Value).ToString(), Palette.Checkpoint, 0.9f);
+                    hud.ShowCenter(((int)e.Value).ToString(), Palette.Checkpoint, 0.9f);
                     break;
 
                 case GameEventType.RaceStarted:
                     Sounds.Play("go", 0.8f);
-                    _hud.ShowCenter("GO!", Palette.Fuel, 1f);
+                    hud.ShowCenter("GO!", Palette.Fuel, 1f);
                     break;
 
                 case GameEventType.BallGrabbed when ship != null:
                 {
                     int ballTeam = (int)e.Value;
-                    _hud.AddFeed($"{ship.Name} GRABBED THE {Teams.Name(ballTeam)} BALL", Palette.Ship(ship));
+                    hud.AddFeed($"{ship.Name} GRABBED THE {Teams.Name(ballTeam)} BALL", Palette.Ship(ship));
                     if (isPlayer)
                     {
                         Sounds.Play("spawn", 0.7f);
-                        _hud.ShowCenter("GOT IT!", Palette.Team(ballTeam), 1.5f, "TOW IT TO YOUR TREASURE");
+                        hud.ShowCenter("GOT IT!", Palette.Team(ballTeam), 1.5f, "TOW IT TO YOUR TREASURE");
                     }
                     else if (player != null && ballTeam == player.Team)
                     {
                         Sounds.Play("beep", 0.8f, 0.5f);
-                        _hud.ShowCenter("BALL TAKEN!", Palette.Warning, 1.5f, $"{ship.Name.ToUpperInvariant()} HAS YOUR BALL");
+                        hud.ShowCenter("BALL TAKEN!", Palette.Warning, 1.5f, $"{ship.Name.ToUpperInvariant()} HAS YOUR BALL");
                     }
                     break;
                 }
@@ -286,25 +404,25 @@ public sealed class PlayScreen : Screen
                     _particles.Burst(pos, Vector2.Zero, 40, 40f, 200f, Color.White, 0.4f, 1.2f);
                     Sounds.Play("lap", 1f);
                     _shake = MathF.Max(_shake, 6f);
-                    _hud.AddFeed($"{ship.Name} CAPTURED THE {Teams.Name((int)e.Value)} BALL!", color);
-                    _hud.ShowCenter($"{Teams.Name(ship.Team).ToUpperInvariant()} SCORES!", color, 2.5f, $"CAPTURED BY {ship.Name.ToUpperInvariant()}");
+                    hud.AddFeed($"{ship.Name} CAPTURED THE {Teams.Name((int)e.Value)} BALL!", color);
+                    hud.ShowCenter($"{Teams.Name(ship.Team).ToUpperInvariant()} SCORES!", color, 2.5f, $"CAPTURED BY {ship.Name.ToUpperInvariant()}");
                     break;
                 }
 
                 case GameEventType.BallReturned:
                 {
                     int ballTeam = (int)e.Value;
-                    _hud.AddFeed(ship != null ? $"{ship.Name} RETURNED THE {Teams.Name(ballTeam)} BALL" : $"{Teams.Name(ballTeam)} BALL RETURNED",
+                    hud.AddFeed(ship != null ? $"{ship.Name} RETURNED THE {Teams.Name(ballTeam)} BALL" : $"{Teams.Name(ballTeam)} BALL RETURNED",
                         Palette.Team(ballTeam));
                     if (player != null && ballTeam == player.Team) Sounds.Play("checkpoint", 0.7f);
                     break;
                 }
 
-                case GameEventType.MatchOver when world.Rules is BallRules ballRules:
+                case GameEventType.MatchOver when world.Rules is BallRules:
                 {
-                    int team = ballRules.WinningTeam;
+                    int team = (int)e.Value;
                     string text = team == Teams.None ? "DRAW" : player?.Team == team ? "YOUR TEAM WINS!" : $"{Teams.Name(team).ToUpperInvariant()} TEAM WINS";
-                    _hud.ShowCenter(text, Palette.Team(team), 5f, "MATCH OVER");
+                    hud.ShowCenter(text, Palette.Team(team), 5f, "MATCH OVER");
                     break;
                 }
 
@@ -312,11 +430,11 @@ public sealed class PlayScreen : Screen
                     var winner = world.Rules.GetStandings(world).FirstOrDefault();
                     if (world.Rules.Mode == GameModeKind.Dogfight && winner != null)
                     {
-                        _hud.ShowCenter(winner == player ? "YOU WIN!" : $"{winner.Name.ToUpperInvariant()} WINS", Palette.Ship(winner), 5f, "MATCH OVER");
+                        hud.ShowCenter(winner == player ? "YOU WIN!" : $"{winner.Name.ToUpperInvariant()} WINS", Palette.Ship(winner), 5f, "MATCH OVER");
                     }
                     else if (player is not { Finished: true })
                     {
-                        _hud.ShowCenter("RACE OVER", Palette.Warning, 5f);
+                        hud.ShowCenter("RACE OVER", Palette.Warning, 5f);
                     }
                     break;
             }
@@ -360,12 +478,44 @@ public sealed class PlayScreen : Screen
         Game.Starfield.Draw(pb, _starCamera, vp.Width, vp.Height, _time);
         pb.End();
 
-        _renderer.Draw(pb, _camera, _match, _particles, Alpha, _time);
+        if (_net is { Connection.Status: ConnectionStatus.Disconnected })
+        {
+            DrawMessage(pb, vp, _matchCount < 0 ? "COULD NOT CONNECT" : "DISCONNECTED",
+                (_net.Connection.Error ?? "Connection closed").ToUpperInvariant(), "ENTER  BACK TO MENU");
+            return;
+        }
+        if (_renderer == null || _hud == null || _net is { Client.IsReady: false })
+        {
+            DrawMessage(pb, vp, "CONNECTING", _net?.Connection.Address.ToUpperInvariant() ?? "", "ESC  CANCEL");
+            return;
+        }
 
-        bool scoreboard = Input.IsDown(Keys.Tab) || Input.IsDown(Buttons.Back) || (_match.World.Rules.IsOver && _overTimer > 1.5f);
-        _hud.Draw(pb, vp, _match, scoreboard, _time);
+        _renderer.Draw(pb, _camera, _session, _particles, _session.Alpha, _time);
+
+        bool over = World.Rules.IsOver && _overTimer > 1.5f;
+        bool scoreboard = Input.IsDown(Keys.Tab) || Input.IsDown(Buttons.Back) || over;
+        _hud.Draw(pb, vp, _session, scoreboard, _time);
+
+        if (_net != null && over && _net.Client.Intermission > 0f)
+        {
+            float s = vp.Height / 720f;
+            pb.Begin(Matrix.Identity, PrimitiveBatch.Additive);
+            VectorFont.Draw(pb, $"NEXT MATCH IN {MathF.Ceiling(_net.Client.Intermission):0}", new Vector2(vp.Width / 2f, vp.Height - 50 * s),
+                14f * s, Palette.Accent, TextAlign.Center);
+            pb.End();
+        }
 
         if (_paused) DrawPauseMenu(pb, vp);
+    }
+
+    private static void DrawMessage(PrimitiveBatch pb, Viewport vp, string title, string detail, string hint)
+    {
+        float s = vp.Height / 720f, cx = vp.Width / 2f;
+        pb.Begin(Matrix.Identity, PrimitiveBatch.Additive);
+        VectorFont.Draw(pb, title, new Vector2(cx, vp.Height * 0.35f), 32f * s, Palette.Accent, TextAlign.Center, 3f * s);
+        VectorFont.Draw(pb, detail, new Vector2(cx, vp.Height * 0.35f + 60 * s), 12f * s, Palette.Text, TextAlign.Center);
+        VectorFont.Draw(pb, hint, new Vector2(cx, vp.Height - 60 * s), 11f * s, Palette.TextDim, TextAlign.Center);
+        pb.End();
     }
 
     private void DrawPauseMenu(PrimitiveBatch pb, Viewport vp)
@@ -377,14 +527,19 @@ public sealed class PlayScreen : Screen
 
         pb.Begin(Matrix.Identity, PrimitiveBatch.Additive);
         float cx = vp.Width / 2f, y = vp.Height * 0.32f;
-        VectorFont.Draw(pb, "PAUSED", new Vector2(cx, y), 36f * s, Palette.Accent, TextAlign.Center, 3f * s);
+        VectorFont.Draw(pb, _net == null ? "PAUSED" : "MENU", new Vector2(cx, y), 36f * s, Palette.Accent, TextAlign.Center, 3f * s);
         y += 80 * s;
-        for (int i = 0; i < PauseItems.Length; i++)
+        var items = PauseItems;
+        for (int i = 0; i < items.Length; i++)
         {
             bool selected = i == _pauseIndex;
-            var label = selected ? $">  {PauseItems[i]}  <" : PauseItems[i];
+            var label = selected ? $">  {Label(items[i])}  <" : Label(items[i]);
             VectorFont.Draw(pb, label, new Vector2(cx, y), 18f * s, selected ? Palette.Text : Palette.TextDim, TextAlign.Center);
             y += 40 * s;
+        }
+        if (_net != null)
+        {
+            VectorFont.Draw(pb, "THE GAME KEEPS RUNNING", new Vector2(cx, y + 20 * s), 10f * s, Palette.TextDim, TextAlign.Center);
         }
         pb.End();
     }

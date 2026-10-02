@@ -34,6 +34,7 @@ public sealed class XPilotGame : Game
         Window.Title = "XPilot";
         Window.AllowUserResizing = true;
         Window.ClientSizeChanged += OnClientSizeChanged;
+        Window.TextInput += (_, e) => Input.OnTextInput(e.Character);
     }
 
     public Settings Settings { get; private set; } = new();
@@ -60,7 +61,8 @@ public sealed class XPilotGame : Game
     }
 
     /// <summary>
-    /// Developer shortcut: <c>XPilot --map arena [--bots 5] [--difficulty hard] [--spectate]</c> skips the menu.
+    /// Developer shortcuts that skip the menu: <c>XPilot --map arena [--bots 5] [--difficulty hard] [--spectate]</c>
+    /// plays locally, and <c>XPilot --connect host[:port] [--name Ace]</c> joins a server.
     /// </summary>
     private Screen? QuickStartScreen()
     {
@@ -69,6 +71,13 @@ public sealed class XPilotGame : Game
         {
             int i = Array.IndexOf(args, name);
             return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+        }
+
+        if (Arg("--connect") is { } address)
+        {
+            var connection = new Net.ClientConnection(Arg("--name") ?? Settings.PlayerName);
+            connection.Connect(address);
+            return new PlayScreen(this, new NetworkSession(connection, null));
         }
 
         var mapName = Arg("--map");
@@ -101,6 +110,7 @@ public sealed class XPilotGame : Game
 
         if (_pendingScreen != null)
         {
+            _screen?.Leave();
             _screen = _pendingScreen;
             _pendingScreen = null;
             _screen.Enter();
@@ -126,6 +136,8 @@ public sealed class XPilotGame : Game
 
     protected override void UnloadContent()
     {
+        _screen?.Leave();
+        _screen = null;
         Sounds?.Dispose();
         Primitives?.Dispose();
         base.UnloadContent();

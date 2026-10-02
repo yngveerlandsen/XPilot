@@ -19,6 +19,12 @@ public sealed class Settings
     public string? LastBallMap { get; set; }
     public int Bots { get; set; } = 3;
     public string Difficulty { get; set; } = "Normal";
+    /// <summary>The last address typed on the join screen.</summary>
+    public string LastAddress { get; set; } = "";
+    /// <summary>UDP port for hosting a game.</summary>
+    public int HostPort { get; set; } = Net.Protocol.DefaultPort;
+    /// <summary>"host:port" of a master server for the internet server list, or null for LAN only.</summary>
+    public string? MasterServer { get; set; }
 
     public static string FilePath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XPilot", "settings.json");
