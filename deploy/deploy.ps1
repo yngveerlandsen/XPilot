@@ -73,14 +73,15 @@ Invoke-Remote "chmod +x $remoteRelease/XPilot.Server && chown -R root:xpilot $re
 Remove-Item $archive, $output -Recurse -Force -ErrorAction SilentlyContinue
 
 Step 'Switching to the new release'
-$previous = (ssh @sshOptions $remote 'readlink /opt/xpilot/current || true').Trim()
+# Empty on the first deploy; "$(...)" turns no output into an empty string rather than $null.
+$previous = "$(ssh @sshOptions $remote 'readlink /opt/xpilot/current || true')".Trim()
 Invoke-Remote "ln -sfn $remoteRelease /opt/xpilot/current"
 Invoke-Remote 'systemctl restart xpilot-master xpilot-server'
 
 Step 'Checking that both services stay up'
 Start-Sleep -Seconds 4
 $state = (ssh @sshOptions $remote 'systemctl is-active xpilot-server xpilot-master' | Out-String)
-$listening = (ssh @sshOptions $remote "journalctl -u xpilot-server --since '-30s' --no-pager | grep -c 'listening on UDP' || true").Trim()
+$listening = "$(ssh @sshOptions $remote "journalctl -u xpilot-server --since '-30s' --no-pager | grep -c 'listening on UDP' || true")".Trim()
 if ($state -match 'failed|inactive|activating' -or $listening -eq '0') {
     Write-Host "`nA service did not come up:" -ForegroundColor Red
     ssh @sshOptions $remote 'journalctl -u xpilot-server -u xpilot-master -n 30 --no-pager'
