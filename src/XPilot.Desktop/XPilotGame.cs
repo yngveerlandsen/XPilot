@@ -16,6 +16,7 @@ public sealed class XPilotGame : Game
     private readonly GraphicsDeviceManager _graphics;
     private Screen? _screen;
     private Screen? _pendingScreen;
+    private float _fps;
 
     public XPilotGame()
     {
@@ -28,7 +29,8 @@ public sealed class XPilotGame : Game
             GraphicsProfile = GraphicsProfile.HiDef,
             HardwareModeSwitch = false,
         };
-        _graphics.PreparingDeviceSettings += (_, e) => e.GraphicsDeviceInformation.PresentationParameters.MultiSampleCount = 4;
+        _graphics.PreparingDeviceSettings += (_, e) =>
+            e.GraphicsDeviceInformation.PresentationParameters.MultiSampleCount = Settings.Antialiasing ? 4 : 0;
         IsFixedTimeStep = false;
         IsMouseVisible = false;
         Window.Title = "XPilot";
@@ -47,7 +49,7 @@ public sealed class XPilotGame : Game
     protected override void Initialize()
     {
         Settings = Settings.Load();
-        if (Settings.Fullscreen) SetFullscreen(true);
+        ApplyVideoSettings();
         base.Initialize();
     }
 
@@ -100,6 +102,14 @@ public sealed class XPilotGame : Game
         });
     }
 
+    /// <summary>Applies the fullscreen, VSync and antialiasing settings.</summary>
+    public void ApplyVideoSettings()
+    {
+        _graphics.SynchronizeWithVerticalRetrace = Settings.VSync;
+        _graphics.PreferMultiSampling = Settings.Antialiasing;
+        SetFullscreen(Settings.Fullscreen);
+    }
+
     /// <summary>Switches screens at the start of the next update.</summary>
     public void SetScreen(Screen screen) => _pendingScreen = screen;
 
@@ -123,6 +133,7 @@ public sealed class XPilotGame : Game
             Settings.Save();
         }
 
+        Sounds.Volume = IsActive || !Settings.MuteInBackground ? Settings.Volume : 0f;
         _screen?.Update(dt);
         base.Update(gameTime);
     }
@@ -130,7 +141,17 @@ public sealed class XPilotGame : Game
     protected override void Draw(GameTime gameTime)
     {
         GraphicsDevice.Clear(Palette.Background);
-        _screen?.Draw((float)gameTime.ElapsedGameTime.TotalSeconds);
+        float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+        _screen?.Draw(dt);
+        if (Settings.ShowFps && dt > 0f)
+        {
+            _fps = _fps <= 0f ? 1f / dt : MathHelper.Lerp(_fps, 1f / dt, 0.05f);
+            var vp = GraphicsDevice.Viewport;
+            float s = vp.Height / 720f;
+            Primitives.Begin(Matrix.Identity, PrimitiveBatch.Additive);
+            VectorFont.Draw(Primitives, $"{_fps:0} FPS", new Vector2(vp.Width / 2f, vp.Height - 18 * s), 9f * s, Palette.TextDim, TextAlign.Center);
+            Primitives.End();
+        }
         base.Draw(gameTime);
     }
 

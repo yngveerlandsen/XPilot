@@ -211,7 +211,7 @@ public sealed class Hud
         VectorFont.Draw(pb, blue, new Vector2(cx + 14 * s, 16 * s), size, Palette.BlueTeam);
 
         string clock = rules.TimeLimit > 0 ? FormatClock(rules.TimeRemaining(world)) + "   " : "";
-        VectorFont.Draw(pb, $"{clock}FIRST TO {rules.CaptureLimit}", new Vector2(cx, 46 * s), 10f * s, Palette.TextDim, TextAlign.Center);
+        VectorFont.Draw(pb, rules.CaptureLimit > 0 ? $"{clock}FIRST TO {rules.CaptureLimit}" : clock.TrimEnd(), new Vector2(cx, 46 * s), 10f * s, Palette.TextDim, TextAlign.Center);
 
         if (player == null) return;
         var teamColor = Palette.Team(player.Team);
@@ -246,7 +246,7 @@ public sealed class Hud
             VectorFont.Draw(pb, $"KILLS {player.Kills}   DEATHS {player.Deaths}", new Vector2(16 * s, 48 * s), 11f * s, Palette.TextDim);
             var standings = rules.GetStandings(match.World);
             int rank = standings.ToList().IndexOf(player) + 1;
-            VectorFont.Draw(pb, $"RANK {rank}/{standings.Count}   FIRST TO {rules.ScoreLimit}", new Vector2(16 * s, 68 * s), 11f * s, Palette.TextDim);
+            VectorFont.Draw(pb, $"RANK {rank}/{standings.Count}" + (rules.ScoreLimit > 0 ? $"   FIRST TO {rules.ScoreLimit}" : ""), new Vector2(16 * s, 68 * s), 11f * s, Palette.TextDim);
         }
 
         if (rules.TimeLimit > 0)

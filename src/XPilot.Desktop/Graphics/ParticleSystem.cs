@@ -35,9 +35,13 @@ public sealed class ParticleSystem
         };
     }
 
+    /// <summary>Scales how many particles bursts create (the Particles setting).</summary>
+    public float Density { get; set; } = 1f;
+
     public void Burst(Vector2 position, Vector2 baseVelocity, int count, float minSpeed, float maxSpeed,
         Color color, float minLife, float maxLife, float width = 1.5f)
     {
+        count = (int)MathF.Round(count * Density);
         for (int i = 0; i < count; i++)
         {
             float angle = (float)_rng.NextDouble() * MathF.Tau;

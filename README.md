@@ -31,8 +31,21 @@ or `XPilot --connect host[:port] [--name Ace]` to join a server.
 | Grab / release ball | E, Right Shift | Ctrl | Y |
 
 Tab shows scores, Esc pauses (in network games it opens a menu and the game keeps running), T chats in
-network games, F11 toggles fullscreen. Switch the preset in the menu, or override single
-actions in `%APPDATA%\XPilot\settings.json`, e.g. `"CustomBindings": { "Fire": ["J"] }`.
+network games, F11 toggles fullscreen. Change the preset or rebind any action under *Settings > Controls*.
+
+## Settings
+
+*Settings* in the main menu (also in the Esc menu during a game) has five pages:
+
+- **Game:** name, bot skill, and match rules for games you play or host: kills or captures to win, time
+  limit and race laps. Also whether other pilots' names show under their ships.
+- **Video:** fullscreen, VSync, antialiasing, screen shake, particle amount and an FPS counter.
+- **Audio:** volume, and muting when the window is in the background.
+- **Controls:** the Modern or Classic preset, rebinding each action (press the new key), and resetting to
+  the preset. Esc, P, Tab, T and F11 are kept for the game itself.
+- **Network:** the port to host on, and a master server for the internet game list.
+
+Everything is saved as you change it, to `%APPDATA%\XPilot\settings.json`.
 
 ## Rules worth knowing
 
@@ -71,7 +84,7 @@ Releases include ready-built servers for Windows and Linux (`XPilot-Server-*.zip
 
 `XPilot.Server --run-master` runs a master server (UDP 15346), like the original XPilot meta-server. It
 must run somewhere reachable from the internet. Game servers started with `--master host:port` register
-with it. Players who set `"MasterServer": "host:port"` in `settings.json` see those servers in the join
+with it. Players who set the master server under *Settings > Network* see those servers in the join
 list. Joining goes through NAT punch-through, so a host behind a typical home router usually doesn't need to
 forward a port. The master only lists servers and introduces players; game traffic goes directly between
 players and the server.

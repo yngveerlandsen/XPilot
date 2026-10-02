@@ -18,6 +18,9 @@ public sealed class WorldRenderer
     private readonly List<Vector2[]> _fillTriangles = [];
     private readonly List<Vector2> _wrapOffsets = [];
 
+    /// <summary>Draw other pilots' names under their ships.</summary>
+    public bool ShowNames { get; set; } = true;
+
     public WorldRenderer(Map map)
     {
         _map = map;
@@ -152,7 +155,7 @@ public sealed class WorldRenderer
             pb.Circle(pos, 22f, 1.5f, color * 0.6f, 24, dashed: true, rotation: time * 2f);
         }
 
-        if (!isPlayer)
+        if (!isPlayer && ShowNames)
         {
             VectorFont.Draw(pb, s.Name, pos + new Vector2(0, 24), 8f, color * 0.55f, TextAlign.Center, 1.1f, glow: 0f);
         }

@@ -14,14 +14,14 @@ namespace XPilot.Desktop.Screens;
 /// <summary>Plays a local match or a network game; most of the screen doesn't care which.</summary>
 public sealed class PlayScreen : Screen
 {
-    private enum PauseItem { Resume, Restart, SwitchTeam, MainMenu, Leave }
+    private enum PauseItem { Resume, Restart, SwitchTeam, Settings, MainMenu, Leave }
 
     private readonly MatchSetup? _setup;
     private readonly IGameSession _session;
     private readonly NetworkSession? _net;
     private readonly Camera _camera = new();
     private readonly ParticleSystem _particles = new();
-    private readonly InputBindings _bindings;
+    private InputBindings _bindings;
     private readonly Random _rng = new();
 
     private WorldRenderer? _renderer;
@@ -36,6 +36,7 @@ public sealed class PlayScreen : Screen
     private int _pauseIndex;
     private string? _chatInput;
     private bool _leaving;
+    private SettingsMenu? _settingsMenu;
 
     /// <summary>A local match against bots.</summary>
     public PlayScreen(XPilotGame game, MatchSetup setup) : this(game, new LocalSession(setup))
@@ -48,6 +49,7 @@ public sealed class PlayScreen : Screen
         _session = session;
         _net = session as NetworkSession;
         _bindings = InputBindings.FromSettings(game.Settings);
+        _particles.Density = game.Settings.ParticleDensity;
         if (!session.IsNetwork) BeginMatch();
     }
 
@@ -55,16 +57,17 @@ public sealed class PlayScreen : Screen
     private Map Map => World.Map;
 
     private PauseItem[] PauseItems => _net == null
-        ? [PauseItem.Resume, PauseItem.Restart, PauseItem.MainMenu]
+        ? [PauseItem.Resume, PauseItem.Restart, PauseItem.Settings, PauseItem.MainMenu]
         : World.Map.Mode == GameModeKind.Ball && _session.Player != null
-            ? [PauseItem.Resume, PauseItem.SwitchTeam, PauseItem.Leave]
-            : [PauseItem.Resume, PauseItem.Leave];
+            ? [PauseItem.Resume, PauseItem.SwitchTeam, PauseItem.Settings, PauseItem.Leave]
+            : [PauseItem.Resume, PauseItem.Settings, PauseItem.Leave];
 
     private static string Label(PauseItem item) => item switch
     {
         PauseItem.Resume => "RESUME",
         PauseItem.Restart => "RESTART",
         PauseItem.SwitchTeam => "SWITCH TEAM",
+        PauseItem.Settings => "SETTINGS",
         PauseItem.MainMenu => "MAIN MENU",
         _ => "LEAVE GAME",
     };
@@ -80,7 +83,7 @@ public sealed class PlayScreen : Screen
     /// <summary>Sets up the renderer and HUD for the current map. Network games call this for every new map.</summary>
     private void BeginMatch()
     {
-        _renderer = new WorldRenderer(Map);
+        _renderer = new WorldRenderer(Map) { ShowNames = Game.Settings.ShowShipNames };
         _hud = new Hud(Map);
         _particles.Clear();
         _overTimer = 0f;
@@ -95,12 +98,12 @@ public sealed class PlayScreen : Screen
         }
         if (World.Rules is DogfightRules dogfight && _net == null)
         {
-            _hud.ShowCenter("DOGFIGHT", Palette.Accent, 2.5f, $"FIRST TO {dogfight.ScoreLimit} KILLS WINS");
+            _hud.ShowCenter("DOGFIGHT", Palette.Accent, 2.5f, dogfight.ScoreLimit > 0 ? $"FIRST TO {dogfight.ScoreLimit} KILLS WINS" : "NO KILL LIMIT");
         }
         else if (World.Rules is BallRules ball && _session.Player is { } player)
         {
             _hud.ShowCenter($"{Teams.Name(player.Team).ToUpperInvariant()} TEAM", Palette.Team(player.Team), 3.5f,
-                $"{_bindings.Describe(GameAction.Grab)} GRABS THE ENEMY BALL - FIRST TO {ball.CaptureLimit}");
+                $"{_bindings.Describe(GameAction.Grab)} GRABS THE ENEMY BALL" + (ball.CaptureLimit > 0 ? $" - FIRST TO {ball.CaptureLimit}" : ""));
         }
         HandleEvents(_session.TakeEvents());
     }
@@ -123,7 +126,16 @@ public sealed class PlayScreen : Screen
             return;
         }
 
-        if (!UpdateChat() && Input.Pause)
+        if (_settingsMenu != null)
+        {
+            _settingsMenu.Update(dt);
+            if (!_settingsMenu.IsOpen)
+            {
+                _settingsMenu = null;
+                ApplySettings();
+            }
+        }
+        else if (!UpdateChat() && Input.Pause)
         {
             _paused = !_paused;
             _pauseIndex = 0;
@@ -132,13 +144,13 @@ public sealed class PlayScreen : Screen
         if (_paused && _net == null)
         {
             Sounds.SetThrust(0f, 1f);
-            UpdatePauseMenu();
+            if (_settingsMenu == null) UpdatePauseMenu();
             return;
         }
 
         var input = _paused || _chatInput != null ? default : _bindings.Read(Input);
         _session.Update(dt, input);
-        if (_paused) UpdatePauseMenu();
+        if (_paused && _settingsMenu == null) UpdatePauseMenu();
         if (_leaving) return;
 
         if (_net != null)
@@ -238,6 +250,9 @@ public sealed class PlayScreen : Screen
                 _leaving = true;
                 Game.SetScreen(new PlayScreen(Game, _setup));
                 break;
+            case PauseItem.Settings:
+                _settingsMenu = new SettingsMenu(Game, inGame: true);
+                break;
             case PauseItem.SwitchTeam:
                 _net?.Client.RequestTeamSwitch();
                 _paused = false;
@@ -246,6 +261,15 @@ public sealed class PlayScreen : Screen
                 ReturnToMenu();
                 break;
         }
+    }
+
+    /// <summary>Picks up changes made in the settings overlay.</summary>
+    private void ApplySettings()
+    {
+        var s = Game.Settings;
+        _bindings = InputBindings.FromSettings(s);
+        _particles.Density = s.ParticleDensity;
+        if (_renderer != null) _renderer.ShowNames = s.ShowShipNames;
     }
 
     private void UpdateCamera(float dt)
@@ -265,13 +289,13 @@ public sealed class PlayScreen : Screen
 
         _shake = MathF.Max(0f, _shake - dt * 25f);
         _camera.Shake = _shake > 0f
-            ? new Vector2((float)_rng.NextDouble() * 2f - 1f, (float)_rng.NextDouble() * 2f - 1f) * _shake
+            ? new Vector2((float)_rng.NextDouble() * 2f - 1f, (float)_rng.NextDouble() * 2f - 1f) * (_shake * Game.Settings.ScreenShake)
             : Vector2.Zero;
     }
 
     private void EmitThrustParticles(float dt)
     {
-        _thrustSpawn += dt * 70f;
+        _thrustSpawn += dt * 70f * _particles.Density;
         int count = (int)_thrustSpawn;
         _thrustSpawn -= count;
         if (count == 0) return;
@@ -505,7 +529,8 @@ public sealed class PlayScreen : Screen
             pb.End();
         }
 
-        if (_paused) DrawPauseMenu(pb, vp);
+        if (_settingsMenu != null) _settingsMenu.Draw(pb, vp, _time);
+        else if (_paused) DrawPauseMenu(pb, vp);
     }
 
     private static void DrawMessage(PrimitiveBatch pb, Viewport vp, string title, string detail, string hint)

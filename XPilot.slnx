@@ -8,5 +8,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/XPilot.Core.Tests/XPilot.Core.Tests.csproj" />
     <Project Path="tests/XPilot.Net.Tests/XPilot.Net.Tests.csproj" />
+    <Project Path="tests/XPilot.Desktop.Tests/XPilot.Desktop.Tests.csproj" />
   </Folder>
 </Solution>

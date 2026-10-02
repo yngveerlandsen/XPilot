@@ -28,6 +28,8 @@ public sealed class InputState
     }
 
     public bool IsDown(Keys key) => _keys.IsKeyDown(key);
+    /// <summary>The first key pressed this frame, if any.</summary>
+    public Keys? FirstPressedKey() => _keys.GetPressedKeys().Where(k => !_prevKeys.IsKeyDown(k)).Select(k => (Keys?)k).FirstOrDefault();
     public bool WasPressed(Keys key) => _keys.IsKeyDown(key) && !_prevKeys.IsKeyDown(key);
     public bool IsDown(Buttons button) => _pad.IsConnected && _pad.IsButtonDown(button);
     public bool WasPressed(Buttons button) => _pad.IsConnected && _pad.IsButtonDown(button) && !_prevPad.IsButtonDown(button);

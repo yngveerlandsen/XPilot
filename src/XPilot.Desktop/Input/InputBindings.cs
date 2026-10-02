@@ -60,6 +60,36 @@ public sealed class InputBindings
 
     public IReadOnlyList<Keys> KeysFor(GameAction action) => _keys[action];
 
+    /// <summary>Keys the game itself uses (pause, scores, chat, fullscreen), which can't be bound to actions.</summary>
+    public static bool IsReserved(Keys key) => key is Keys.Escape or Keys.P or Keys.Tab or Keys.T or Keys.F11 or Keys.F5;
+
+    /// <summary>
+    /// Makes <paramref name="key"/> the only key for <paramref name="action"/>. An action that used the key
+    /// loses it, or takes over the rebound action's old keys if it had no others, so nothing ends up unbound.
+    /// </summary>
+    public static void Rebind(Settings settings, GameAction action, Keys key)
+    {
+        var current = FromSettings(settings);
+        var custom = settings.CustomBindings ?? [];
+        foreach (var other in Enum.GetValues<GameAction>())
+        {
+            if (other == action || !current._keys[other].Contains(key)) continue;
+            var remaining = current._keys[other].Where(k => k != key).ToArray();
+            if (remaining.Length == 0) remaining = current._keys[action].Where(k => k != key).ToArray();
+            custom[other.ToString()] = remaining.Select(k => k.ToString()).ToArray();
+        }
+        custom[action.ToString()] = [key.ToString()];
+        settings.CustomBindings = custom;
+    }
+
+    public static string ActionName(GameAction action) => action switch
+    {
+        GameAction.TurnLeft => "TURN LEFT",
+        GameAction.TurnRight => "TURN RIGHT",
+        GameAction.Grab => "GRAB BALL",
+        _ => action.ToString().ToUpperInvariant(),
+    };
+
     public string Describe(GameAction action) => string.Join("/", _keys[action].Select(KeyName));
 
     public bool IsDown(InputState input, GameAction action) => _keys[action].Any(input.IsDown);
@@ -88,7 +118,7 @@ public sealed class InputBindings
         return new ShipInput { Turn = Math.Clamp(turn, -1f, 1f), Thrust = thrust, Fire = fire, Shield = shield, Grab = grab };
     }
 
-    private static string KeyName(Keys key) => key switch
+    public static string KeyName(Keys key) => key switch
     {
         Keys.Left => "LEFT",
         Keys.Right => "RIGHT",

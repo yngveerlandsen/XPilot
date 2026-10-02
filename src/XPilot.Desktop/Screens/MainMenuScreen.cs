@@ -12,7 +12,7 @@ namespace XPilot.Desktop.Screens;
 
 public sealed class MainMenuScreen : Screen
 {
-    private enum Item { Mode, Map, Bots, Difficulty, Controls, Name, Start, Host, Join, Quit }
+    private enum Item { Mode, Map, Bots, Difficulty, Name, Start, Host, Join, Settings, Quit }
 
     private static readonly Item[] Items = Enum.GetValues<Item>();
 
@@ -111,12 +111,6 @@ public sealed class MainMenuScreen : Screen
             case Item.Difficulty:
                 _difficulty = (BotDifficulty)(((int)_difficulty + delta + 3) % 3);
                 break;
-            case Item.Controls:
-                Game.Settings.ControlPreset = Game.Settings.ControlPreset == InputBindings.ClassicPreset
-                    ? InputBindings.ModernPreset
-                    : InputBindings.ClassicPreset;
-                Game.Settings.Save();
-                break;
             default:
                 return;
         }
@@ -135,8 +129,14 @@ public sealed class MainMenuScreen : Screen
                 HostGame();
                 break;
             case Item.Join:
+                if (CurrentMap is { } joinMap) RememberChoices(joinMap);
                 Sounds.Play("select", 0.6f);
                 Game.SetScreen(new JoinScreen(Game));
+                break;
+            case Item.Settings:
+                if (CurrentMap is { } settingsMap) RememberChoices(settingsMap);
+                Sounds.Play("select", 0.6f);
+                Game.SetScreen(new SettingsScreen(Game));
                 break;
             case Item.Name:
                 _editingName = Game.Settings.PlayerName;
@@ -162,6 +162,10 @@ public sealed class MainMenuScreen : Screen
             BotCount = _bots,
             Difficulty = _difficulty,
             PlayerName = Game.Settings.PlayerName,
+            ScoreLimit = Game.Settings.ScoreLimit,
+            CaptureLimit = Game.Settings.CaptureLimit,
+            TimeLimit = Game.Settings.TimeLimitSeconds,
+            Laps = Game.Settings.LapsOrDefault,
         }));
     }
 
@@ -186,6 +190,10 @@ public sealed class MainMenuScreen : Screen
             BotCount = _bots,
             Difficulty = _difficulty,
             MasterServer = s.MasterServer,
+            ScoreLimit = s.ScoreLimit,
+            CaptureLimit = s.CaptureLimit,
+            TimeLimit = s.TimeLimitSeconds,
+            Laps = s.LapsOrDefault,
         };
         var host = new ServerHost(new GameServer(options, rotation));
         if (!host.Start())
@@ -263,13 +271,13 @@ public sealed class MainMenuScreen : Screen
                 Item.Map => ("MAP", CurrentMap?.Name.ToUpperInvariant() ?? "NONE"),
                 Item.Bots => ("BOTS", _bots.ToString()),
                 Item.Difficulty => ("SKILL", _difficulty.ToString().ToUpperInvariant()),
-                Item.Controls => ("CONTROLS", Game.Settings.ControlPreset.ToUpperInvariant()),
                 Item.Name => ("NAME", _editingName != null
                     ? _editingName + (((int)(_time * 3f) & 1) == 0 ? "_" : " ")
                     : Game.Settings.PlayerName),
                 Item.Start => ("PLAY " + ModeName(_mode) + " VS BOTS", null),
                 Item.Host => ("HOST " + ModeName(_mode) + " GAME", null),
                 Item.Join => ("JOIN NETWORK GAME", null),
+                Item.Settings => ("SETTINGS", null),
                 _ => ("QUIT", (string?)null),
             };
             if (selected) color *= 0.85f + 0.15f * MathF.Sin(_time * 8f);
