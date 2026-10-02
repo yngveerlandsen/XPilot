@@ -117,29 +117,32 @@ public sealed class JoinScreen(XPilotGame game) : Screen(game)
         VectorFont.Draw(pb, address.ToUpperInvariant(), new Vector2(cx + 24 * s, y), 16f * s, _editing ? Palette.Accent : color);
 
         y += 60 * s;
-        float left = cx - 420 * s;
-        VectorFont.Draw(pb, "SERVER", new Vector2(left, y), 10f * s, Palette.TextDim);
-        VectorFont.Draw(pb, "MAP", new Vector2(left + 380 * s, y), 10f * s, Palette.TextDim);
-        VectorFont.Draw(pb, "PLAYERS", new Vector2(left + 640 * s, y), 10f * s, Palette.TextDim);
-        VectorFont.Draw(pb, "WHERE", new Vector2(left + 760 * s, y), 10f * s, Palette.TextDim);
+        var servers = Servers;
+        var rows = servers.Select(server => new[]
+        {
+            Truncate(server.Info.Name, XPilot.Net.Protocol.MaxServerNameLength).ToUpperInvariant(),
+            Truncate(server.Info.MapName, 24).ToUpperInvariant(),
+            server.Info.Mode.ToUpperInvariant(),
+            $"{server.Info.Humans}/{server.Info.Capacity}",
+            server.OnLan ? "LAN" : "INTERNET",
+        }).ToList();
+        var (columns, size) = LayOutColumns(rows, cx, vp.Width, s);
+        float left = columns[0];
+        string[] headings = ["SERVER", "MAP", "MODE", "PLAYERS", "WHERE"];
+        for (int c = 0; c < headings.Length; c++) VectorFont.Draw(pb, headings[c], new Vector2(columns[c], y), 10f * s, Palette.TextDim);
         y += 28 * s;
 
-        if (Servers.Count == 0)
+        if (rows.Count == 0)
         {
             string searching = "SEARCHING" + new string('.', (int)(_time * 2f) % 4);
             VectorFont.Draw(pb, searching, new Vector2(left, y), 13f * s, Palette.TextDim * 0.8f);
             y += 30 * s;
         }
-        for (int i = 0; i < Servers.Count; i++)
+        for (int i = 0; i < rows.Count; i++)
         {
-            var server = Servers[i];
-            var info = server.Info;
             var rowColor = RowColor(i + 1);
-            if (_selected == i + 1) VectorFont.Draw(pb, ">", new Vector2(left - 24 * s, y), 13f * s, rowColor);
-            VectorFont.Draw(pb, Truncate(info.Name, 28).ToUpperInvariant(), new Vector2(left, y), 13f * s, rowColor);
-            VectorFont.Draw(pb, $"{Truncate(info.MapName, 14)} {info.Mode}".ToUpperInvariant(), new Vector2(left + 380 * s, y), 13f * s, rowColor);
-            VectorFont.Draw(pb, $"{info.Humans}/{info.Capacity}", new Vector2(left + 640 * s, y), 13f * s, rowColor);
-            VectorFont.Draw(pb, server.OnLan ? "LAN" : "INTERNET", new Vector2(left + 760 * s, y), 13f * s, rowColor);
+            if (_selected == i + 1) VectorFont.Draw(pb, ">", new Vector2(left - 24 * s, y), size, rowColor);
+            for (int c = 0; c < rows[i].Length; c++) VectorFont.Draw(pb, rows[i][c], new Vector2(columns[c], y), size, rowColor);
             y += 30 * s;
         }
 
@@ -155,6 +158,38 @@ public sealed class JoinScreen(XPilotGame game) : Screen(game)
         VectorFont.Draw(pb, _editing ? "TYPE HOST OR HOST:PORT   ENTER CONNECT   ESC DONE" : "ARROWS CHOOSE   ENTER JOIN   F5 REFRESH   ESC BACK",
             new Vector2(cx, vp.Height - 50 * s), 10f * s, Palette.TextDim * 0.6f, TextAlign.Center);
         pb.End();
+    }
+
+    /// <summary>
+    /// Places the server table's columns from the widest entry in each (headings included), centred on the
+    /// screen, shrinking the text if the table would not fit. Returns each column's left edge and the text size.
+    /// </summary>
+    private static (float[] Columns, float Size) LayOutColumns(List<string[]> rows, float cx, float screenWidth, float s)
+    {
+        string[] minimums = ["SERVER", "MAP", "MODE", "PLAYERS", "WHERE"];
+        float size = 13f * s, gap = 36f * s;
+        float[] Widths(float textSize) => minimums
+            .Select((heading, c) => rows.Select(r => VectorFont.Measure(r[c], textSize)).Append(VectorFont.Measure(heading, 10f * s)).Max())
+            .ToArray();
+
+        var widths = Widths(size);
+        float total = widths.Sum() + gap * (widths.Length - 1);
+        float available = screenWidth - 96f * s;
+        if (total > available)
+        {
+            size *= available / total;
+            widths = Widths(size);
+            total = widths.Sum() + gap * (widths.Length - 1);
+        }
+
+        var columns = new float[widths.Length];
+        float x = cx - total / 2f;
+        for (int c = 0; c < widths.Length; c++)
+        {
+            columns[c] = x;
+            x += widths[c] + gap;
+        }
+        return (columns, size);
     }
 
     private Color RowColor(int row)
