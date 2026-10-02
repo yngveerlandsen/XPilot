@@ -69,7 +69,8 @@ public sealed class XPilotGame : Game
 
     /// <summary>
     /// Developer shortcuts that skip the menu: <c>XPilot --map arena [--bots 5] [--difficulty hard] [--spectate]</c>
-    /// plays locally, and <c>XPilot --connect host[:port] [--name Ace]</c> joins a server.
+    /// plays locally, <c>XPilot --connect host[:port] [--name Ace]</c> joins a server, and <c>XPilot --join</c>
+    /// opens the join screen.
     /// </summary>
     private Screen? QuickStartScreen()
     {
@@ -79,6 +80,8 @@ public sealed class XPilotGame : Game
             int i = Array.IndexOf(args, name);
             return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
         }
+
+        if (args.Contains("--join")) return new JoinScreen(this);
 
         if (Arg("--connect") is { } address)
         {
