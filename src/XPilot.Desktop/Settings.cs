@@ -20,7 +20,10 @@ public sealed class Settings
     public string Particles { get; set; } = "Normal";
     public bool ShowFps { get; set; }
     public bool ShowShipNames { get; set; } = true;
+    /// <summary>Sound effects volume (named before there was music, so older settings files keep their level).</summary>
     public float Volume { get; set; } = 0.7f;
+    /// <summary>Music volume, independent of the effects; 0 turns the music off.</summary>
+    public float MusicVolume { get; set; } = 0.5f;
     public bool MuteInBackground { get; set; } = true;
     public string PlayerName { get; set; } = "Player";
     public string Mode { get; set; } = "Dogfight";

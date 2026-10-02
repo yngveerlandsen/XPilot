@@ -40,7 +40,8 @@ network games, F11 toggles fullscreen. Change the preset or rebind any action un
 - **Game:** name, bot skill, and match rules for games you play or host: kills or captures to win, time
   limit and race laps. Also whether other pilots' names show under their ships.
 - **Video:** fullscreen, VSync, antialiasing, screen shake, particle amount and an FPS counter.
-- **Audio:** volume, and muting when the window is in the background.
+- **Audio:** separate sound effects and music volumes, the track playing (Enter skips to another), and
+  muting when the window is in the background.
 - **Controls:** the Modern or Classic preset, rebinding each action (press the new key), and resetting to
   the preset. Esc, P, Tab, T and F11 are kept for the game itself.
 - **Network:** the port to host on, and a master server for the internet game list.
@@ -99,6 +100,11 @@ your inputs, so it responds instantly. When a snapshot shows the server disagree
 inputs the server hasn't seen yet and smooths out the difference. Bullets fly in straight lines, so clients
 simulate them from where they were fired rather than receiving their positions. The tests in
 `tests/XPilot.Net.Tests` run full games over a simulated network with latency, jitter and packet loss.
+
+## Music
+
+Any `.ogg` files in `music/` are played in random order, without repeating a track until all have played.
+They're copied next to the game when it builds. To change the music, add or remove files there.
 
 ## Project layout
 

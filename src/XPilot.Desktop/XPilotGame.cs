@@ -43,6 +43,7 @@ public sealed class XPilotGame : Game
     public InputState Input { get; } = new();
     public PrimitiveBatch Primitives { get; private set; } = null!;
     public SoundBank Sounds { get; private set; } = null!;
+    public MusicPlayer Music { get; private set; } = null!;
     public MapCatalog Maps { get; private set; } = null!;
     public Starfield Starfield { get; } = new();
 
@@ -57,6 +58,7 @@ public sealed class XPilotGame : Game
     {
         Primitives = new PrimitiveBatch(GraphicsDevice);
         Sounds = SoundBank.Create(Settings.Volume);
+        Music = MusicPlayer.Load();
         Maps = MapCatalog.Load();
         foreach (var error in Maps.Errors) Console.Error.WriteLine($"Map error: {error}");
         SetScreen(QuickStartScreen() ?? new MainMenuScreen(this));
@@ -133,7 +135,11 @@ public sealed class XPilotGame : Game
             Settings.Save();
         }
 
-        Sounds.Volume = IsActive || !Settings.MuteInBackground ? Settings.Volume : 0f;
+        bool audible = IsActive || !Settings.MuteInBackground;
+        Sounds.Volume = audible ? Settings.Volume : 0f;
+        Music.Volume = audible ? Settings.MusicVolume : 0f;
+        if (Settings.MusicVolume > 0f && Sounds.Enabled) Music.Update();
+        else if (Music.NowPlaying != null) Music.Dispose();
         _screen?.Update(dt);
         base.Update(gameTime);
     }
@@ -159,6 +165,7 @@ public sealed class XPilotGame : Game
     {
         _screen?.Leave();
         _screen = null;
+        Music?.Dispose();
         Sounds?.Dispose();
         Primitives?.Dispose();
         base.UnloadContent();

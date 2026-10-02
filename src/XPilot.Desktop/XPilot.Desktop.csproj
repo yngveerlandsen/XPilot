@@ -19,6 +19,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\maps\*.xpm" LinkBase="maps" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\music\*.ogg" LinkBase="music" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />

@@ -78,12 +78,20 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
         ],
         Tab.Audio =>
         [
-            new("VOLUME", () => VolumeBar(S.Volume), d =>
+            new("SOUND EFFECTS", () => VolumeBar(S.Volume), d =>
             {
                 S.Volume = Math.Clamp(MathF.Round(S.Volume * 10f + d) / 10f, 0f, 1f);
                 game.Sounds.Volume = S.Volume;
                 game.Sounds.Play("fire", 0.8f);
             }),
+            new("MUSIC", () => VolumeBar(S.MusicVolume), d => S.MusicVolume = Math.Clamp(MathF.Round(S.MusicVolume * 10f + d) / 10f, 0f, 1f)),
+            new("NOW PLAYING", () => game.Music.TrackCount == 0 ? "NO MUSIC FOUND"
+                    : S.MusicVolume <= 0f ? "MUSIC OFF"
+                    : game.Music.NowPlaying ?? "-",
+                Activate: () =>
+                {
+                    if (S.MusicVolume > 0f) game.Music.Skip();
+                }),
             new("MUTE IN BACKGROUND", () => OnOff(S.MuteInBackground), _ => S.MuteInBackground = !S.MuteInBackground),
         ],
         Tab.Controls => ControlItems(),
@@ -295,6 +303,7 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
         }
 
         if (Tabs[_tab] == Tab.Game) Note(pb, cx, y + 10 * s, s, "MATCH RULES APPLY TO GAMES YOU PLAY OR HOST" + (inGame ? ", FROM THE NEXT ONE" : ""));
+        if (Tabs[_tab] == Tab.Audio) Note(pb, cx, y + 10 * s, s, "ENTER ON NOW PLAYING SKIPS TO ANOTHER TRACK - ADD .OGG FILES TO THE MUSIC FOLDER");
         if (Tabs[_tab] == Tab.Controls) Note(pb, cx, y + 10 * s, s, "GAMEPAD: STICK TURNS, A/RT THRUST, X/RB FIRE, B/LT SHIELD, Y GRAB");
         if (Tabs[_tab] == Tab.Network) Note(pb, cx, y + 10 * s, s, "MASTER SERVER IS HOST:PORT OF AN XPILOT.SERVER --RUN-MASTER");
 
