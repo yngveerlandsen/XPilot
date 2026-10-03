@@ -324,6 +324,14 @@ public sealed class MainMenuScreen : Screen
             VectorFont.Draw(pb, $"{Game.Maps.Errors.Count} MAP(S) FAILED TO LOAD - SEE CONSOLE",
                 new Vector2(cx, 200 * s), 9f * s, Palette.Warning, TextAlign.Center);
         }
+        if (Game.Updater.Status is { } update)
+        {
+            VectorFont.Draw(pb, update, new Vector2(cx, 16 * s), 10f * s, Palette.Accent, TextAlign.Center);
+        }
+        if (GameUpdater.Version is { } version)
+        {
+            VectorFont.Draw(pb, $"V{version}", new Vector2(vp.Width - 16 * s, vp.Height - 24 * s), 9f * s, Palette.TextDim * 0.6f, TextAlign.Right);
+        }
         pb.End();
     }
 }

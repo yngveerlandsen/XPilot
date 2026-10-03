@@ -5,6 +5,16 @@ shields, fuel, and glowing vector graphics, against AI bots or other players ove
 Modes: **Dogfight** (free-for-all, first to 10 kills), **Race** (checkpoints and laps) and
 **Capture the ball** (Red vs Blue: tow the enemy ball into your own treasure, first to 3).
 
+## Install
+
+Download `XPilot-win-Setup.exe` from the [latest release](https://github.com/yngveerlandsen/XPilot/releases/latest)
+and run it. It installs for your user only (no administrator prompt), adds Start menu and desktop shortcuts,
+and keeps the game up to date: new releases download in the background and install when you quit. Uninstall it
+from *Settings > Apps*. The releases also have a plain zip, for running without installing.
+
+The installer isn't code signed yet, so Windows shows "Windows protected your PC" the first time: choose
+*More info* and *Run anyway*.
+
 ## Run
 
 Requires the .NET 10 SDK.
@@ -148,3 +158,10 @@ x # solid   q w a s  diagonal walls (solid half: top-left, top-right, bottom-lef
 _ base      F fuel    + attractor   - repeller   1..9 checkpoints   . or space = empty
 r b red/blue team base     R B red/blue treasure (ball mode)
 ```
+
+## License
+
+The code is under the [MIT License](LICENSE). Two parts of the repository are not:
+
+- `maps/classic/`: the original XPilot maps, under the GNU GPL version 2. See [maps/classic/README.md](maps/classic/README.md).
+- `music/`: four tracks used under the Pixabay Content License. See [music/README.md](music/README.md).
