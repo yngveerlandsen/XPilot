@@ -1,7 +1,8 @@
 name: Release
 
-# Pushing a tag like v0.2.0 builds the Windows game and the dedicated server (Windows and Linux) and attaches
-# the zips to that tag's GitHub release, creating the release if it doesn't exist. Tags with a suffix (v0.2.0-beta.1) are marked as pre-releases.
+# Pushing a tag like v0.2.0 builds the Windows game (installer and zip) and the dedicated server (Windows and
+# Linux) and attaches them to that tag's GitHub release, creating the release if it doesn't exist. Installed
+# copies of the game find new releases here and update themselves. Tags with a suffix (v0.2.0-beta.1) are marked as pre-releases.
 on:
   push:
     tags: ['v*']
@@ -45,6 +46,19 @@ jobs:
               -p:Version="$version" -o "out/XPilot-Server-$TAG-$rid"
           done
 
+      # Velopack turns the published game into XPilot-win-Setup.exe plus the update packages that installed
+      # copies download. vpk must be the same version as the Velopack library the game uses.
+      - name: Installer
+        run: |
+          version="${TAG#v}"
+          vpk_version=$(grep -o 'Include="Velopack" Version="[^"]*' src/XPilot.Desktop/XPilot.Desktop.csproj | cut -d'"' -f4)
+          dotnet tool install -g vpk --version "$vpk_version"
+          # The previous release's package lets vpk build a small delta update; there is none the first time.
+          vpk download github --repoUrl "https://github.com/${{ github.repository }}" --token "$GH_TOKEN" -o releases \
+            || echo "No earlier installer release to build a delta from"
+          vpk pack -u XPilot -v "$version" -p "out/XPilot-$TAG-win-x64" -e XPilot.exe --packTitle XPilot \
+            -i src/XPilot.Desktop/Icon.ico -o releases
+
       - name: Zip
         shell: pwsh
         run: |
@@ -62,3 +76,10 @@ jobs:
             [[ "$TAG" == *-* ]] && prerelease="--prerelease"
             gh release create "$TAG" "${zips[@]}" --title "$TAG" --generate-notes $prerelease
           fi
+
+      - name: Upload installer and update packages
+        run: |
+          pre=""
+          [[ "$TAG" == *-* ]] && pre="--pre"
+          vpk upload github --repoUrl "https://github.com/${{ github.repository }}" --token "$GH_TOKEN" -o releases \
+            --tag "$TAG" --releaseName "$TAG" --merge --publish $pre

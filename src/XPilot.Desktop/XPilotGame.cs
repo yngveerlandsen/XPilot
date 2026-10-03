@@ -46,6 +46,8 @@ public sealed class XPilotGame : Game
     public MusicPlayer Music { get; private set; } = null!;
     public MapCatalog Maps { get; private set; } = null!;
     public Starfield Starfield { get; } = new();
+    /// <summary>Background updates for installed copies.</summary>
+    public GameUpdater Updater { get; } = GameUpdater.Start();
     /// <summary>The bot fight behind the menus.</summary>
     public MenuBackground Background { get; private set; } = null!;
 
