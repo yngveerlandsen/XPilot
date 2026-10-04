@@ -60,8 +60,8 @@ public sealed class InputBindings
 
     public IReadOnlyList<Keys> KeysFor(GameAction action) => _keys[action];
 
-    /// <summary>Keys the game itself uses (pause, scores, chat, fullscreen), which can't be bound to actions.</summary>
-    public static bool IsReserved(Keys key) => key is Keys.Escape or Keys.P or Keys.Tab or Keys.T or Keys.F11 or Keys.F5;
+    /// <summary>Keys the game itself uses (pause, scores, chat, fullscreen, screenshot), which can't be bound to actions.</summary>
+    public static bool IsReserved(Keys key) => key is Keys.Escape or Keys.P or Keys.Tab or Keys.T or Keys.F11 or Keys.F12 or Keys.F5;
 
     /// <summary>
     /// Makes <paramref name="key"/> the only key for <paramref name="action"/>. An action that used the key
