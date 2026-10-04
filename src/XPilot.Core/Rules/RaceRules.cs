@@ -1,3 +1,4 @@
+using XPilot.Core.AI;
 using XPilot.Core.Maps;
 using XPilot.Core.Simulation;
 
@@ -8,15 +9,29 @@ namespace XPilot.Core.Rules;
 /// respawn at their last checkpoint, and the race ends when everyone finishes or a grace period
 /// after the winner runs out.
 /// </summary>
-public sealed class RaceRules(int laps) : IGameRules
+/// <param name="checkpointRadius">How close a ship must come to a checkpoint; see <see cref="ZoneRadius"/>.</param>
+public sealed class RaceRules(int laps, float checkpointRadius = 104f) : IGameRules
 {
     public const float CountdownSeconds = 3f;
+
+    /// <summary>
+    /// The checkpoint zone for a skill level, the same on every map. Smaller than most tracks are wide, so you
+    /// have to steer through the checkpoint rather than just fly down the track.
+    /// </summary>
+    public static float ZoneRadius(BotDifficulty skill) => skill switch
+    {
+        BotDifficulty.Easy => 144f,
+        BotDifficulty.Hard => 72f,
+        _ => 104f,
+    };
 
     private int _finishedCount;
     private float? _firstFinishTime;
     private int _lastCountdown = -1;
 
     public int Laps { get; } = Math.Max(1, laps);
+    /// <summary>How close to a checkpoint's centre a ship must come, with no wall in the way.</summary>
+    public float CheckpointRadius { get; private set; } = checkpointRadius;
     public float GraceAfterFirstFinish { get; init; } = 30f;
 
     public GameModeKind Mode => GameModeKind.Race;
@@ -73,7 +88,10 @@ public sealed class RaceRules(int laps) : IGameRules
         foreach (var s in world.Ships)
         {
             if (!s.Alive || s.Finished) continue;
-            if (map.Distance(s.Position, map.Checkpoints[s.NextCheckpoint]) <= map.CheckpointRadius)
+            var checkpoint = map.Checkpoints[s.NextCheckpoint];
+            // The zone is big enough to reach through walls into a neighbouring stretch of track, so the ship
+            // must also be able to see the checkpoint.
+            if (map.Distance(s.Position, checkpoint) <= CheckpointRadius && map.SegmentClear(s.Position, checkpoint, 0f))
             {
                 PassCheckpoint(world, s);
             }
@@ -136,6 +154,7 @@ public sealed class RaceRules(int laps) : IGameRules
         writer.Write(_finishedCount);
         writer.Write(_firstFinishTime ?? -1f);
         writer.Write(_lastCountdown);
+        writer.Write(CheckpointRadius);
     }
 
     public void ReadState(BinaryReader reader)
@@ -146,6 +165,8 @@ public sealed class RaceRules(int laps) : IGameRules
         float first = reader.ReadSingle();
         _firstFinishTime = first >= 0f ? first : null;
         _lastCountdown = reader.ReadInt32();
+        // Added later; servers from before it don't send it, and then the default stays.
+        if (reader.BaseStream.Position + sizeof(float) <= reader.BaseStream.Length) CheckpointRadius = reader.ReadSingle();
     }
 
     public void Respawn(World world, Ship ship)

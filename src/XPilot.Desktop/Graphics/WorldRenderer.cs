@@ -81,7 +81,8 @@ public sealed class WorldRenderer
         if (world.Rules.Mode == GameModeKind.Race)
         {
             if (player.Finished) return null;
-            return (_map.Checkpoints[player.NextCheckpoint], Palette.Checkpoint * 0.8f, _map.CheckpointRadius + 60f);
+            float zone = world.Rules is RaceRules race ? race.CheckpointRadius : 0f;
+            return (_map.Checkpoints[player.NextCheckpoint], Palette.Checkpoint * 0.8f, zone + 60f);
         }
         if (world.Rules.Mode != GameModeKind.Ball || _map.TreasureOf(player.Team) is not { } home) return null;
 
@@ -226,7 +227,7 @@ public sealed class WorldRenderer
             for (int i = 0; i < _map.Checkpoints.Count; i++)
             {
                 var p = toView(_map.Checkpoints[i]);
-                float radius = _map.CheckpointRadius;
+                float radius = world.Rules is RaceRules race ? race.CheckpointRadius : 0f;
                 if (!view.Contains(p, radius + 20f)) continue;
                 bool isNext = i == next;
                 var color = isNext ? Palette.Checkpoint * (0.75f + 0.25f * MathF.Sin(time * 6f)) : Palette.CheckpointDim;

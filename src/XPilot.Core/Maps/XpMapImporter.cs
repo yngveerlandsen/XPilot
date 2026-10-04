@@ -102,8 +102,6 @@ public static class XpMapImporter
             Wrap = wrap,
             Gravity = ConvertGravity(options),
             Laps = GetInt(options, "racelaps") ?? 3,
-            // Not an original XPilot option; maps made for this game can widen the gates.
-            CheckpointRadius = GetFloat(options, "checkpointradius") ?? 96f,
             Bases = bases.Select(b => b.Position).ToList(),
             BaseTeams = bases.Select(b => TeamOf(b.TeamDigit)).ToList(),
             Treasures = treasureList,

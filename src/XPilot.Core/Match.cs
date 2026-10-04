@@ -91,7 +91,7 @@ public sealed class Match : IMatchView
 
     public static IGameRules CreateRules(MatchSetup setup) => setup.Map.Mode switch
     {
-        GameModeKind.Race => new RaceRules(setup.Laps ?? setup.Map.Laps),
+        GameModeKind.Race => new RaceRules(setup.Laps ?? setup.Map.Laps, RaceRules.ZoneRadius(setup.Difficulty)),
         GameModeKind.Ball => new BallRules(setup.CaptureLimit, setup.TimeLimit ?? 600f),
         _ => new DogfightRules(setup.ScoreLimit, setup.TimeLimit ?? 300f),
     };

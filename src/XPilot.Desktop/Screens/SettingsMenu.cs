@@ -45,7 +45,7 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
         Tab.Game =>
         [
             new("NAME", () => S.PlayerName, Activate: () => Edit(S.PlayerName, Protocol.MaxNameLength, t => S.PlayerName = Protocol.CleanName(t))),
-            new("BOT SKILL", () => S.Difficulty.ToUpperInvariant(),
+            new("SKILL", () => S.Difficulty.ToUpperInvariant(),
                 d => S.Difficulty = Cycle(Enum.GetNames<BotDifficulty>(), S.Difficulty, d)),
             new("DOGFIGHT KILLS TO WIN", () => Limit(S.ScoreLimit), d => S.ScoreLimit = Cycle(ScoreLimits, S.ScoreLimit, d)),
             new("BALL CAPTURES TO WIN", () => Limit(S.CaptureLimit), d => S.CaptureLimit = Cycle(CaptureLimits, S.CaptureLimit, d)),
@@ -305,7 +305,7 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
             y += 36 * s;
         }
 
-        if (Tabs[_tab] == Tab.Game) Note(pb, cx, y + 10 * s, s, "MATCH RULES APPLY TO GAMES YOU PLAY OR HOST" + (inGame ? ", FROM THE NEXT ONE" : ""));
+        if (Tabs[_tab] == Tab.Game) Note(pb, cx, y + 10 * s, s, "SKILL SETS BOTS AND RACE CHECKPOINT SIZE - MATCH RULES APPLY TO GAMES YOU PLAY OR HOST" + (inGame ? ", FROM THE NEXT ONE" : ""));
         if (Tabs[_tab] == Tab.Audio) Note(pb, cx, y + 10 * s, s, "ENTER ON NOW PLAYING SKIPS TO ANOTHER TRACK - ADD .OGG FILES TO THE MUSIC FOLDER");
         if (Tabs[_tab] == Tab.Controls) Note(pb, cx, y + 10 * s, s, "GAMEPAD: STICK TURNS, A/RT THRUST, X/RB FIRE, B/LT SHIELD, Y GRAB");
         if (Tabs[_tab] == Tab.Network) Note(pb, cx, y + 10 * s, s, "CLEAR THE MASTER SERVER FOR LAN ONLY - LISTING HOSTED GAMES SHOWS YOUR ADDRESS");
