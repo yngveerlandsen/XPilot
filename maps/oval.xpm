@@ -4,7 +4,6 @@ mode: race
 size: 40 24
 border: true
 laps: 3
-checkpoint_radius: 112
 ---
 xq....................................wx
 q......................................w

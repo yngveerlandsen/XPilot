@@ -1,3 +1,4 @@
+using System.Numerics;
 using XPilot.Core.Maps;
 using XPilot.Core.Rules;
 using XPilot.Core.Simulation;
@@ -6,15 +7,15 @@ namespace XPilot.Core.Tests;
 
 public class RaceTests
 {
+    // Checkpoints 13 tiles apart, further than a zone reaches, so passing one never passes the next.
     private const string Track = """
         mode: race
         border: true
         laps: 2
-        checkpoint_radius: 40
         ---
-        ....................
-        ._....1.....2....3..
-        ....................
+        ............................................
+        ._............1............2............3...
+        ............................................
         """;
 
     private static (World World, Ship Ship, RaceRules Rules) Race()
@@ -81,6 +82,74 @@ public class RaceTests
         Assert.True(ship.Finished);
         Assert.Equal(1, ship.Place);
         Assert.True(rules.IsOver);
+    }
+
+    [Fact]
+    public void Checkpoints_DoNotCountThroughWalls()
+    {
+        // The checkpoint is well inside the zone's reach, but on the other side of a wall.
+        const string walled = """
+            mode: race
+            border: true
+            ---
+            ................................
+            ._....x.1..................2....
+            ......x.........................
+            """;
+        var world = new World(MapLoader.Parse(walled), new GameConfig(), new RaceRules(1));
+        var ship = world.AddShip("Racer", false);
+        world.Start();
+        SkipCountdown(world);
+
+        // Positions relative to the checkpoint; the wall is two tiles to its left, in its row and the one below.
+        var checkpoint = world.Map.Checkpoints[0];
+        Vector2 Tiles(float x, float y) => checkpoint + new Vector2(x, y) * Map.TileSize;
+
+        ship.Position = Tiles(-4, 0);
+        ship.Velocity = default;
+        world.Step([]);
+        Assert.True(world.Map.Distance(ship.Position, checkpoint) < world.Map.CheckpointRadius);
+        Assert.Equal(0, ship.NextCheckpoint);
+
+        ship.Position = Tiles(-4, 1);
+        world.Step([]);
+        Assert.Equal(0, ship.NextCheckpoint);
+
+        // Above the wall, with a clear view, it counts.
+        ship.Position = Tiles(-2, -1);
+        world.Step([]);
+        Assert.Equal(1, ship.NextCheckpoint);
+    }
+
+    public static IEnumerable<object[]> OwnRaceMaps => TestUtil.MapFiles
+        .Where(f => !f.Contains("classic"))
+        .Select(f => (File: f, Map: MapLoader.Load(f)))
+        .Where(m => m.Map.Mode == GameModeKind.Race)
+        .Select(m => new object[] { Path.GetRelativePath(TestUtil.MapsDirectory, m.File) });
+
+    /// <summary>Wherever a ship crosses the track at a checkpoint, it is inside the zone.</summary>
+    [Theory]
+    [MemberData(nameof(OwnRaceMaps))]
+    public void CheckpointZones_CoverTheWholeTrackWidth(string file)
+    {
+        var map = MapLoader.Load(Path.Combine(TestUtil.MapsDirectory, file));
+        for (int i = 0; i < map.Checkpoints.Count; i++)
+        {
+            var c = map.Checkpoints[i];
+            // The narrowest span through the checkpoint runs across the track.
+            float bestSpan = float.MaxValue, far = 0f;
+            for (int k = 0; k < 32; k++)
+            {
+                float angle = k * MathF.PI / 32f;
+                var d = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+                float ahead = map.ClearDistance(c, d, 2000f, 0f), behind = map.ClearDistance(c, -d, 2000f, 0f);
+                if (ahead + behind >= bestSpan) continue;
+                bestSpan = ahead + behind;
+                far = MathF.Max(ahead, behind);
+            }
+            float reach = far - new GameConfig().ShipRadius;
+            Assert.True(reach <= map.CheckpointRadius, $"{file} checkpoint {i + 1}: ships can pass {reach:F0}px from its centre");
+        }
     }
 
     [Fact]

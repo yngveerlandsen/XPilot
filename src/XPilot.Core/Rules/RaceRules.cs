@@ -73,7 +73,10 @@ public sealed class RaceRules(int laps) : IGameRules
         foreach (var s in world.Ships)
         {
             if (!s.Alive || s.Finished) continue;
-            if (map.Distance(s.Position, map.Checkpoints[s.NextCheckpoint]) <= map.CheckpointRadius)
+            var checkpoint = map.Checkpoints[s.NextCheckpoint];
+            // The zone is big enough to reach through walls into a neighbouring stretch of track, so the ship
+            // must also be able to see the checkpoint.
+            if (map.Distance(s.Position, checkpoint) <= map.CheckpointRadius && map.SegmentClear(s.Position, checkpoint, 0f))
             {
                 PassCheckpoint(world, s);
             }

@@ -60,7 +60,13 @@ public sealed class Map
     public Vector2 Gravity { get; init; }
     public float AttractorStrength { get; init; } = 3_000_000f;
     public int Laps { get; init; } = 3;
-    public float CheckpointRadius { get; init; } = 96f;
+    /// <summary>
+    /// How close a ship must come to a checkpoint's centre to pass it, with a clear line to it. The same on every
+    /// map: 10 tiles covers the full width of every race track that ships, so flying through always counts.
+    /// </summary>
+    public const float CheckpointZoneRadius = 320f;
+
+    public float CheckpointRadius => CheckpointZoneRadius;
     public IReadOnlyList<Vector2> Bases { get; init; } = [];
     /// <summary>Team of each entry in <see cref="Bases"/> (<see cref="Teams.None"/> for neutral bases).</summary>
     public IReadOnlyList<int> BaseTeams { get; init; } = [];

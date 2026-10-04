@@ -192,7 +192,6 @@ public static class MapLoader
             Gravity = GetVector(header, "gravity", Vector2.Zero),
             AttractorStrength = GetFloat(header, "attractor", 3_000_000f),
             Laps = (int)GetFloat(header, "laps", 3),
-            CheckpointRadius = GetFloat(header, "checkpoint_radius", 96f),
             Bases = bases,
             BaseTeams = baseTeams,
             Treasures = treasures,

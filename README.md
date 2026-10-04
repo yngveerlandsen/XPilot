@@ -64,6 +64,8 @@ Everything is saved as you change it, to `%APPDATA%\XPilot\settings.json`.
 - Hitting a wall slowly bounces you off; hitting it fast destroys you (unless your shield is up).
 - Dogfight: +1 per kill, -1 for crashing or shooting yourself.
 - Race: pass checkpoints in order; the highest number is the finish line. Respawns put you at your last checkpoint.
+  A checkpoint counts anywhere inside its circle (the same size on every map, wider than any track) as long as
+  no wall is in the way.
 - Capture the ball: fly near the enemy ball and press Grab to tow it on a rope (it drags you around), then pull it
   into your own treasure box. Kill a carrier to make them drop it. Touch your own dropped ball to send it home;
   otherwise it returns by itself after 20 seconds. Teammates cannot hurt each other. Capture = +3, kill = +1.
@@ -152,7 +154,6 @@ wrap: false             # fly off one edge, appear on the other
 gravity: 0 30           # constant pull (px/s^2)
 attractor: 3000000      # strength of + / - gravity points
 laps: 3                 # race only
-checkpoint_radius: 96   # race only
 ---
 x # solid   q w a s  diagonal walls (solid half: top-left, top-right, bottom-left, bottom-right)
 _ base      F fuel    + attractor   - repeller   1..9 checkpoints   . or space = empty
