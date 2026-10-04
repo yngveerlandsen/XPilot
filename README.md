@@ -47,7 +47,7 @@ network games, F11 toggles fullscreen. Change the preset or rebind any action un
 
 *Settings* in the main menu (also in the Esc menu during a game) has five pages:
 
-- **Game:** name, bot skill, and match rules for games you play or host: kills or captures to win, time
+- **Game:** name, skill (bots, and race checkpoint size), and match rules for games you play or host: kills or captures to win, time
   limit and race laps. Also whether other pilots' names show under their ships.
 - **Video:** fullscreen, VSync, antialiasing, screen shake, particle amount and an FPS counter.
 - **Audio:** separate sound effects and music volumes, the track playing (Enter skips to another), and
@@ -64,8 +64,8 @@ Everything is saved as you change it, to `%APPDATA%\XPilot\settings.json`.
 - Hitting a wall slowly bounces you off; hitting it fast destroys you (unless your shield is up).
 - Dogfight: +1 per kill, -1 for crashing or shooting yourself.
 - Race: pass checkpoints in order; the highest number is the finish line. Respawns put you at your last checkpoint.
-  A checkpoint counts anywhere inside its circle (the same size on every map, wider than any track) as long as
-  no wall is in the way.
+  A checkpoint counts anywhere inside its circle, as long as no wall is in the way. The circle is the same size
+  on every map and shrinks with the skill setting: 144 px radius on Easy, 104 on Normal, 72 on Hard.
 - Capture the ball: fly near the enemy ball and press Grab to tow it on a rope (it drags you around), then pull it
   into your own treasure box. Kill a carrier to make them drop it. Touch your own dropped ball to send it home;
   otherwise it returns by itself after 20 seconds. Teammates cannot hurt each other. Capture = +3, kill = +1.

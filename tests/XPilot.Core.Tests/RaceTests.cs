@@ -96,7 +96,8 @@ public class RaceTests
             ._....x.1..................2....
             ......x.........................
             """;
-        var world = new World(MapLoader.Parse(walled), new GameConfig(), new RaceRules(1));
+        var rules = new RaceRules(1, RaceRules.ZoneRadius(XPilot.Core.AI.BotDifficulty.Normal));
+        var world = new World(MapLoader.Parse(walled), new GameConfig(), rules);
         var ship = world.AddShip("Racer", false);
         world.Start();
         SkipCountdown(world);
@@ -105,13 +106,13 @@ public class RaceTests
         var checkpoint = world.Map.Checkpoints[0];
         Vector2 Tiles(float x, float y) => checkpoint + new Vector2(x, y) * Map.TileSize;
 
-        ship.Position = Tiles(-4, 0);
+        ship.Position = Tiles(-3, 0);
         ship.Velocity = default;
         world.Step([]);
-        Assert.True(world.Map.Distance(ship.Position, checkpoint) < world.Map.CheckpointRadius);
+        Assert.True(world.Map.Distance(ship.Position, checkpoint) < rules.CheckpointRadius);
         Assert.Equal(0, ship.NextCheckpoint);
 
-        ship.Position = Tiles(-4, 1);
+        ship.Position = Tiles(-3, 1);
         world.Step([]);
         Assert.Equal(0, ship.NextCheckpoint);
 
@@ -121,35 +122,38 @@ public class RaceTests
         Assert.Equal(1, ship.NextCheckpoint);
     }
 
-    public static IEnumerable<object[]> OwnRaceMaps => TestUtil.MapFiles
-        .Where(f => !f.Contains("classic"))
-        .Select(f => (File: f, Map: MapLoader.Load(f)))
-        .Where(m => m.Map.Mode == GameModeKind.Race)
-        .Select(m => new object[] { Path.GetRelativePath(TestUtil.MapsDirectory, m.File) });
-
-    /// <summary>Wherever a ship crosses the track at a checkpoint, it is inside the zone.</summary>
-    [Theory]
-    [MemberData(nameof(OwnRaceMaps))]
-    public void CheckpointZones_CoverTheWholeTrackWidth(string file)
+    [Fact]
+    public void CheckpointZones_ShrinkWithSkill_AndAreTheSameOnEveryMap()
     {
-        var map = MapLoader.Load(Path.Combine(TestUtil.MapsDirectory, file));
-        for (int i = 0; i < map.Checkpoints.Count; i++)
+        float easy = RaceRules.ZoneRadius(XPilot.Core.AI.BotDifficulty.Easy);
+        float normal = RaceRules.ZoneRadius(XPilot.Core.AI.BotDifficulty.Normal);
+        float hard = RaceRules.ZoneRadius(XPilot.Core.AI.BotDifficulty.Hard);
+        Assert.True(easy > normal && normal > hard);
+
+        var races = TestUtil.MapFiles.Select(MapLoader.Load).Where(m => m.Mode == GameModeKind.Race).ToList();
+        Assert.True(races.Count >= 4);
+        foreach (var map in races)
         {
-            var c = map.Checkpoints[i];
-            // The narrowest span through the checkpoint runs across the track.
-            float bestSpan = float.MaxValue, far = 0f;
-            for (int k = 0; k < 32; k++)
-            {
-                float angle = k * MathF.PI / 32f;
-                var d = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
-                float ahead = map.ClearDistance(c, d, 2000f, 0f), behind = map.ClearDistance(c, -d, 2000f, 0f);
-                if (ahead + behind >= bestSpan) continue;
-                bestSpan = ahead + behind;
-                far = MathF.Max(ahead, behind);
-            }
-            float reach = far - new GameConfig().ShipRadius;
-            Assert.True(reach <= map.CheckpointRadius, $"{file} checkpoint {i + 1}: ships can pass {reach:F0}px from its centre");
+            var rules = (RaceRules)Match.CreateRules(new MatchSetup { Map = map, Difficulty = XPilot.Core.AI.BotDifficulty.Hard });
+            Assert.Equal(hard, rules.CheckpointRadius);
         }
+    }
+
+    [Fact]
+    public void CheckpointZone_ReachesClients_AndOlderServersStillParse()
+    {
+        var server = new RaceRules(3, 72f);
+        var stream = new MemoryStream();
+        server.WriteState(new BinaryWriter(stream));
+        var client = new RaceRules(3);
+        client.ReadState(new BinaryReader(new MemoryStream(stream.ToArray())));
+        Assert.Equal(72f, client.CheckpointRadius);
+
+        // A server from before the zone size was sent: the client keeps its default.
+        var old = stream.ToArray()[..^sizeof(float)];
+        var fromOld = new RaceRules(3);
+        fromOld.ReadState(new BinaryReader(new MemoryStream(old)));
+        Assert.Equal(RaceRules.ZoneRadius(XPilot.Core.AI.BotDifficulty.Normal), fromOld.CheckpointRadius);
     }
 
     [Fact]

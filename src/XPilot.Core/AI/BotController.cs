@@ -158,7 +158,8 @@ public sealed class BotController
 
         _path.Clear();
         var (ux, uy) = Map.TileOf(s.Position);
-        float stopValue = MathF.Max(0.5f, map.CheckpointRadius / Map.TileSize - 1.5f);
+        float zone = (_world.Rules as Rules.RaceRules)?.CheckpointRadius ?? Rules.RaceRules.ZoneRadius(BotDifficulty.Normal);
+        float stopValue = MathF.Max(0.5f, zone / Map.TileSize - 1.5f);
         int checkpoint = s.NextCheckpoint;
         int stepsLeft = LookaheadSteps;
         int firstLegEnd = -1;
@@ -176,7 +177,7 @@ public sealed class BotController
         for (int i = _path.Count - 1; i >= 0; i--)
         {
             // Points past the next checkpoint only count if the straight line still goes through it.
-            if (i > firstLegEnd && MathUtil.DistanceToSegment(next, s.Position, _path[i]) > map.CheckpointRadius * 0.6f) continue;
+            if (i > firstLegEnd && MathUtil.DistanceToSegment(next, s.Position, _path[i]) > zone * 0.6f) continue;
             if (map.SegmentClear(s.Position, _path[i], r))
             {
                 SetWaypoint(_path[i], false);
