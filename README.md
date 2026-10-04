@@ -7,13 +7,25 @@ Modes: **Dogfight** (free-for-all, first to 10 kills), **Race** (checkpoints and
 
 ## Install
 
-Download `XPilot-win-Setup.exe` from the [latest release](https://github.com/yngveerlandsen/XPilot/releases/latest)
-and run it. It installs for your user only (no administrator prompt), adds Start menu and desktop shortcuts,
-and keeps the game up to date: new releases download in the background and install when you quit. Uninstall it
-from *Settings > Apps*. The releases also have a plain zip, for running without installing.
+Everything is on the [latest release](https://github.com/yngveerlandsen/XPilot/releases/latest).
 
-The installer isn't code signed yet, so Windows shows "Windows protected your PC" the first time: choose
-*More info* and *Run anyway*.
+**Windows:** download `XPilot-win-Setup.exe` and run it. It installs for your user only (no administrator
+prompt), adds Start menu and desktop shortcuts, and keeps the game up to date: new releases download in the
+background and install when you quit. Uninstall it from *Settings > Apps*. The installer isn't code signed
+yet, so Windows shows "Windows protected your PC" the first time: choose *More info* and *Run anyway*.
+
+**Linux (x64):** download `XPilot.AppImage`, make it executable and run it:
+
+```
+chmod +x XPilot.AppImage
+./XPilot.AppImage
+```
+
+It updates itself the same way. It needs a graphical desktop with OpenGL and PulseAudio or PipeWire, which
+every common desktop has.
+
+Both platforms also get a plain archive (`XPilot-<version>-win-x64.zip`, `XPilot-<version>-linux-x64.tar.gz`)
+for running without installing; those copies don't update themselves.
 
 ## Run
 
@@ -41,7 +53,8 @@ or `XPilot --connect host[:port] [--name Ace]` to join a server.
 | Grab / release ball | E, Right Shift | Ctrl | Y |
 
 Tab shows scores, Esc pauses (in network games it opens a menu and the game keeps running), T chats in
-network games, F11 toggles fullscreen. Change the preset or rebind any action under *Settings > Controls*.
+network games, F11 toggles fullscreen and F12 saves a screenshot to your
+Pictures folder. Change the preset or rebind any action under *Settings > Controls*.
 
 ## Settings
 
@@ -90,8 +103,8 @@ dotnet run --project src/XPilot.Server -- --map arena,caverns --time-limit 300
 dotnet run --project src/XPilot.Server -- --help
 ```
 
-Releases include ready-built servers for Windows and Linux (`XPilot-Server-*.zip`). On Linux, run
-`chmod +x XPilot.Server` once after unzipping.
+Releases include ready-built servers for Windows (`XPilot-Server-<version>-win-x64.zip`) and Linux
+(`XPilot-Server-<version>-linux-x64.tar.gz`, ready to run after unpacking).
 
 ### Internet server list
 

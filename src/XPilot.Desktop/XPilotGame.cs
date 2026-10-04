@@ -17,6 +17,12 @@ public sealed class XPilotGame : Game
     private Screen? _screen;
     private Screen? _pendingScreen;
     private float _fps;
+    private bool _screenshotRequested;
+    private double _elapsed;
+    /// <summary>Seconds after start to take a screenshot and quit (the --screenshot-after developer option).</summary>
+    private double? _screenshotThenQuitAt;
+    private string? _notice;
+    private float _noticeTimer;
 
     public XPilotGame()
     {
@@ -66,6 +72,9 @@ public sealed class XPilotGame : Game
         Maps = MapCatalog.Load();
         foreach (var error in Maps.Errors) Console.Error.WriteLine($"Map error: {error}");
         Background = MenuBackground.Create(Maps);
+        var args = Environment.GetCommandLineArgs();
+        int shotArg = Array.IndexOf(args, "--screenshot-after");
+        if (shotArg >= 0 && shotArg + 1 < args.Length && double.TryParse(args[shotArg + 1], out double seconds)) _screenshotThenQuitAt = seconds;
         SetScreen(QuickStartScreen() ?? new MainMenuScreen(this));
     }
 
@@ -149,6 +158,10 @@ public sealed class XPilotGame : Game
         Music.Volume = audible ? Settings.MusicVolume : 0f;
         if (Settings.MusicVolume > 0f && Sounds.Enabled) Music.Update();
         else if (Music.NowPlaying != null) Music.Stop();
+        _elapsed += dt;
+        if (Input.WasPressed(Keys.F12) || _elapsed >= _screenshotThenQuitAt) _screenshotRequested = true;
+        _noticeTimer = MathF.Max(0f, _noticeTimer - dt);
+
         _screen?.Update(dt);
         base.Update(gameTime);
     }
@@ -167,7 +180,52 @@ public sealed class XPilotGame : Game
             VectorFont.Draw(Primitives, $"{_fps:0} FPS", new Vector2(vp.Width / 2f, vp.Height - 18 * s), 9f * s, Palette.TextDim, TextAlign.Center);
             Primitives.End();
         }
+        if (_screenshotRequested)
+        {
+            _screenshotRequested = false;
+            SaveScreenshot();
+            if (_elapsed >= _screenshotThenQuitAt) Exit();
+        }
+        if (_noticeTimer > 0f && _notice != null)
+        {
+            var vp = GraphicsDevice.Viewport;
+            float s = vp.Height / 720f;
+            Primitives.Begin(Matrix.Identity, PrimitiveBatch.Additive);
+            VectorFont.Draw(Primitives, _notice, new Vector2(vp.Width / 2f, 40 * s), 11f * s, Palette.Accent * MathF.Min(1f, _noticeTimer), TextAlign.Center);
+            Primitives.End();
+        }
         base.Draw(gameTime);
+    }
+
+    /// <summary>Saves what is on screen as a PNG in the Pictures folder (F12).</summary>
+    private void SaveScreenshot()
+    {
+        try
+        {
+            var pp = GraphicsDevice.PresentationParameters;
+            int w = pp.BackBufferWidth, h = pp.BackBufferHeight;
+            var pixels = new Color[w * h];
+            GraphicsDevice.GetBackBufferData(pixels);
+            // The game draws additively, which leaves the alpha channel meaningless; a screenshot is opaque.
+            for (int i = 0; i < pixels.Length; i++) pixels[i].A = 255;
+            using var texture = new Texture2D(GraphicsDevice, w, h);
+            texture.SetData(pixels);
+
+            var pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+            if (string.IsNullOrEmpty(pictures)) pictures = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var dir = Path.Combine(pictures, "XPilot");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, $"xpilot-{DateTime.Now:yyyyMMdd-HHmmss}.png");
+            using (var file = File.Create(path)) texture.SaveAsPng(file, w, h);
+            Console.WriteLine($"Screenshot saved: {path}");
+            _notice = $"SCREENSHOT SAVED TO {dir.ToUpperInvariant()}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException)
+        {
+            Console.Error.WriteLine($"Screenshot failed: {ex.Message}");
+            _notice = "SCREENSHOT FAILED";
+        }
+        _noticeTimer = 2.5f;
     }
 
     protected override void UnloadContent()

@@ -1,8 +1,8 @@
 name: Release
 
-# Pushing a tag like v0.2.0 builds the Windows game (installer and zip) and the dedicated server (Windows and
-# Linux) and attaches them to that tag's GitHub release, creating the release if it doesn't exist. Installed
-# copies of the game find new releases here and update themselves. Tags with a suffix (v0.2.0-beta.1) are marked as pre-releases.
+# Pushing a tag like v0.2.0 builds the game for Windows (installer and zip) and Linux (AppImage and tar.gz) and
+# the dedicated server for both, and attaches them to that tag's GitHub release, creating the release if it
+# doesn't exist. Installed copies of the game find new releases here and update themselves. Tags with a suffix (v0.2.0-beta.1) are marked as pre-releases.
 on:
   push:
     tags: ['v*']
@@ -39,8 +39,10 @@ jobs:
       - name: Publish
         run: |
           version="${TAG#v}"
-          dotnet publish src/XPilot.Desktop -c Release -r win-x64 --self-contained \
-            -p:Version="$version" -o "out/XPilot-$TAG-win-x64"
+          for rid in win-x64 linux-x64; do
+            dotnet publish src/XPilot.Desktop -c Release -r "$rid" --self-contained \
+              -p:Version="$version" -o "out/XPilot-$TAG-$rid"
+          done
           for rid in win-x64 linux-x64; do
             dotnet publish src/XPilot.Server -c Release -r "$rid" --self-contained \
               -p:Version="$version" -o "out/XPilot-Server-$TAG-$rid"
@@ -58,17 +60,40 @@ jobs:
             || echo "No earlier installer release to build a delta from"
           vpk pack -u XPilot -v "$version" -p "out/XPilot-$TAG-win-x64" -e XPilot.exe --packTitle XPilot \
             -i src/XPilot.Desktop/Icon.ico -o releases
+          # The Linux AppImage is cross-built from here: [linux] tells vpk which platform to package for.
+          vpk "[linux]" download github --repoUrl "https://github.com/${{ github.repository }}" --token "$GH_TOKEN" \
+            -o releases-linux || echo "No earlier Linux release to build a delta from"
+          vpk "[linux]" pack -u XPilot -v "$version" -p "out/XPilot-$TAG-linux-x64" -e XPilot --packTitle XPilot \
+            -i src/XPilot.Desktop/Icon.png -o releases-linux
 
-      - name: Zip
+      - name: Zip (Windows) and tar.gz (Linux)
         shell: pwsh
         run: |
-          Get-ChildItem out -Directory | ForEach-Object {
+          Get-ChildItem out -Directory | Where-Object Name -like '*-win-x64' | ForEach-Object {
             Compress-Archive -Path $_.FullName -DestinationPath "$($_.Name).zip"
           }
+          # Files built on Windows carry no Unix permissions, and a zip doesn't keep them anyway. Write the
+          # tarballs with Python so the programs are marked executable and unpack ready to run.
+          $script = @'
+          import os, sys, tarfile
+          root = sys.argv[1]
+          name = os.path.basename(root)
+          programs = {"XPilot", "XPilot.Server", "createdump"}
+          def mode(info):
+              base = os.path.basename(info.name)
+              info.mode = 0o755 if info.isdir() or base in programs else 0o644
+              info.uid = info.gid = 0
+              info.uname = info.gname = ""
+              return info
+          with tarfile.open(name + ".tar.gz", "w:gz") as tar:
+              tar.add(root, arcname=name, filter=mode)
+          '@
+          Set-Content tarball.py $script
+          Get-ChildItem out -Directory | Where-Object Name -like '*-linux-x64' | ForEach-Object { python tarball.py $_.FullName }
 
       - name: Upload to release
         run: |
-          zips=(XPilot-*.zip)
+          zips=(XPilot-*.zip XPilot-*.tar.gz)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${zips[@]}" --clobber
           else
@@ -83,3 +108,5 @@ jobs:
           [[ "$TAG" == *-* ]] && pre="--pre"
           vpk upload github --repoUrl "https://github.com/${{ github.repository }}" --token "$GH_TOKEN" -o releases \
             --tag "$TAG" --releaseName "$TAG" --merge --publish $pre
+          vpk "[linux]" upload github --repoUrl "https://github.com/${{ github.repository }}" --token "$GH_TOKEN" \
+            -o releases-linux --tag "$TAG" --releaseName "$TAG" --merge --publish $pre
