@@ -79,9 +79,10 @@ public sealed class XPilotGame : Game
     }
 
     /// <summary>
-    /// Developer shortcuts that skip the menu: <c>XPilot --map arena [--bots 5] [--difficulty hard] [--spectate]</c>
-    /// plays locally, <c>XPilot --connect host[:port] [--name Ace]</c> joins a server, and <c>XPilot --join</c>
-    /// opens the join screen.
+    /// Developer shortcuts that skip the menu: <c>XPilot --map arena [--bots 5] [--difficulty hard] [--spectate]
+    /// [--mode koth] [--events chaos] [--event blackhole]</c> plays locally (with the settings' match rules, and
+    /// optionally an event started at once), <c>XPilot --connect host[:port] [--name Ace]</c> joins a server,
+    /// <c>XPilot --join</c> opens the join screen and <c>XPilot --settings events</c> a settings page.
     /// </summary>
     private Screen? QuickStartScreen()
     {
@@ -93,6 +94,7 @@ public sealed class XPilotGame : Game
         }
 
         if (args.Contains("--join")) return new JoinScreen(this);
+        if (Arg("--settings") is { } page) return new SettingsScreen(this, Enum.TryParse<SettingsPage>(page, true, out var p) ? p : SettingsPage.Game);
 
         if (Arg("--connect") is { } address)
         {
@@ -111,14 +113,27 @@ public sealed class XPilotGame : Game
             Console.Error.WriteLine($"Unknown map '{mapName}'.");
             return null;
         }
-        return new PlayScreen(this, new Core.MatchSetup
+        var config = Settings.Rules.CreateConfig();
+        if (Enum.TryParse<Core.Simulation.EventFrequency>(Arg("--events"), true, out var frequency)) config.Events = frequency;
+        var setup = new Core.MatchSetup
         {
             Map = map,
+            Mode = Arg("--mode") is { } mode ? Core.GameModes.Parse(mode) : null,
             BotCount = int.TryParse(Arg("--bots"), out int bots) ? bots : 3,
             Difficulty = Enum.TryParse<Core.AI.BotDifficulty>(Arg("--difficulty"), true, out var d) ? d : Core.AI.BotDifficulty.Normal,
             IncludePlayer = !args.Contains("--spectate"),
             PlayerName = Settings.PlayerName,
-        });
+            ScoreLimit = Settings.ScoreLimit,
+            CaptureLimit = Settings.CaptureLimit,
+            TeamScoreLimit = Settings.TeamScoreLimit,
+            Lives = Settings.Lives,
+            HillScoreLimit = Settings.HillScoreLimit,
+            Config = config,
+        };
+        if (!Enum.TryParse<Core.Simulation.ChaosKind>(Arg("--event"), true, out var kind)) return new PlayScreen(this, setup);
+        var session = new LocalSession(setup);
+        session.World.Chaos.Start(session.World, kind, 60f);
+        return new PlayScreen(this, session);
     }
 
     /// <summary>Applies the fullscreen, VSync and antialiasing settings, keeping the window's size unless fullscreen changes.</summary>
@@ -197,7 +212,29 @@ public sealed class XPilotGame : Game
         base.Draw(gameTime);
     }
 
-    /// <summary>Saves what is on screen as a PNG in the Pictures folder (F12).</summary>
+    /// <summary>
+    /// Folders to save screenshots in, best first: Pictures\XPilot, then the game's own folder in AppData for when
+    /// Pictures can't be written (Windows' Controlled Folder Access blocks it unless the game is allowed).
+    /// <c>--screenshot-dir</c> replaces both.
+    /// </summary>
+    private List<string> ScreenshotFolders()
+    {
+        var args = Environment.GetCommandLineArgs();
+        int i = Array.IndexOf(args, "--screenshot-dir");
+        if (i >= 0 && i + 1 < args.Length) return [args[i + 1]];
+
+        var folders = new List<string>();
+        var pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        if (string.IsNullOrEmpty(pictures)) pictures = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!_picturesBlocked && !string.IsNullOrEmpty(pictures)) folders.Add(Path.Combine(pictures, "XPilot"));
+        folders.Add(Path.Combine(Path.GetDirectoryName(Settings.FilePath)!, "Screenshots"));
+        return folders;
+    }
+
+    /// <summary>Set once saving to Pictures has failed, so later screenshots go straight to the fallback.</summary>
+    private bool _picturesBlocked;
+
+    /// <summary>Saves what is on screen as a PNG (F12), in the first of <see cref="ScreenshotFolders"/> that works.</summary>
     private void SaveScreenshot()
     {
         try
@@ -211,14 +248,25 @@ public sealed class XPilotGame : Game
             using var texture = new Texture2D(GraphicsDevice, w, h);
             texture.SetData(pixels);
 
-            var pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-            if (string.IsNullOrEmpty(pictures)) pictures = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var dir = Path.Combine(pictures, "XPilot");
-            Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, $"xpilot-{DateTime.Now:yyyyMMdd-HHmmss}.png");
-            using (var file = File.Create(path)) texture.SaveAsPng(file, w, h);
-            Console.WriteLine($"Screenshot saved: {path}");
-            _notice = $"SCREENSHOT SAVED TO {dir.ToUpperInvariant()}";
+            var folders = ScreenshotFolders();
+            for (int i = 0; i < folders.Count; i++)
+            {
+                var dir = folders[i];
+                try
+                {
+                    Directory.CreateDirectory(dir);
+                    var path = Path.Combine(dir, $"xpilot-{DateTime.Now:yyyyMMdd-HHmmss}.png");
+                    using (var file = File.Create(path)) texture.SaveAsPng(file, w, h);
+                    Console.WriteLine($"Screenshot saved: {path}");
+                    _notice = $"SCREENSHOT SAVED TO {dir.ToUpperInvariant()}";
+                    break;
+                }
+                catch (Exception ex) when (i + 1 < folders.Count && ex is IOException or UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine($"Could not save the screenshot in {dir}: {ex.Message}");
+                    _picturesBlocked = true;
+                }
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException)
         {

@@ -7,7 +7,7 @@ namespace XPilot.Core.Rules;
 /// Red vs Blue. Tow the enemy ball into your own treasure to score. A dropped ball returns home when a
 /// teammate touches it, or by itself after <see cref="ReturnTime"/>. Teammates cannot hurt each other.
 /// </summary>
-public sealed class BallRules(int captureLimit = 3, float timeLimit = 600f) : IGameRules
+public sealed class BallRules(int captureLimit = 3, float timeLimit = 600f) : ITeamRules
 {
     /// <summary>How close the ball must come to the carrier's treasure to score.</summary>
     public const float CaptureRadius = 56f;
@@ -17,6 +17,8 @@ public sealed class BallRules(int captureLimit = 3, float timeLimit = 600f) : IG
     private readonly int[] _teamScores = new int[2];
 
     public int CaptureLimit { get; } = captureLimit;
+    public int TeamScoreLimit => CaptureLimit;
+    public bool IsTeamGame => true;
     /// <summary>Seconds; 0 means no limit.</summary>
     public float TimeLimit { get; } = timeLimit;
     /// <summary>The winning team once the match is over, or <see cref="Teams.None"/> for a draw.</summary>

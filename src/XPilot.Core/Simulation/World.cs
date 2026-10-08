@@ -23,6 +23,8 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
     public List<Bullet> Bullets { get; } = [];
     /// <summary>Team balls; empty outside ball mode.</summary>
     public List<Ball> Balls { get; } = [];
+    /// <summary>Random events in progress.</summary>
+    public ChaosDirector Chaos { get; } = new();
     /// <summary>Events produced by the last <see cref="Start"/> or <see cref="Step"/> call.</summary>
     public IReadOnlyList<GameEvent> Events => _events;
     public float Time { get; private set; }
@@ -75,6 +77,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
     {
         _events.Clear();
         const float dt = GameConfig.Dt;
+        Chaos.Update(this, Rules.ControlsLocked || Rules.IsOver);
 
         foreach (var s in Ships)
         {
@@ -110,8 +113,49 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
             float mag = MathF.Min(Map.AttractorStrength / (dist * dist), Config.AttractorMaxAccel);
             g += d / dist * (mag * src.Sign);
         }
+        g *= Config.GravityScale;
+        return Chaos.Active.Count > 0 ? ChaosGravity(p, g) : g;
+    }
+
+    /// <summary>Gravity as changed by the random events running now.</summary>
+    private Vector2 ChaosGravity(Vector2 p, Vector2 g)
+    {
+        if (Chaos.Has(ChaosKind.ZeroGravity))
+        {
+            g = Vector2.Zero;
+        }
+        else if (Chaos.Has(ChaosKind.HeavyGravity))
+        {
+            // Strong, but never more than the engine can lift.
+            g *= 2.5f;
+            g.Y = MathF.Max(g.Y, 180f);
+            g = MathUtil.ClampLength(g, Config.ThrustAccel * 0.75f);
+        }
+        else if (Chaos.Has(ChaosKind.GravityFlip))
+        {
+            g = -g;
+            if (Map.Gravity.LengthSquared() < 20f * 20f) g.Y -= 150f;
+        }
+
+        if (Chaos.Get(ChaosKind.BlackHole) is { } hole)
+        {
+            var d = Map.Delta(p, hole.Point);
+            float dist = d.Length();
+            if (dist > 1f && dist < ChaosDirector.BlackHoleRange)
+            {
+                g += d / dist * MathF.Min(ChaosDirector.BlackHoleStrength / (dist * dist), ChaosDirector.BlackHoleMaxAccel);
+            }
+        }
+        if (Chaos.Get(ChaosKind.SolarWind) is { } wind) g += wind.Point * ChaosDirector.WindAccel;
         return g;
     }
+
+    /// <summary>1, or 0 while <see cref="ChaosKind.UnlimitedFuel"/> runs.</summary>
+    private float FuelUse => Chaos.Has(ChaosKind.UnlimitedFuel) ? 0f : 1f;
+
+    private float FireFuel => Chaos.Has(ChaosKind.RapidFire) ? 0f : Config.FireFuel * FuelUse;
+
+    private float FireCooldownTime => Config.FireCooldown * (Chaos.Has(ChaosKind.RapidFire) ? 0.33f : 1f);
 
     public void SpawnShip(Ship s, Vector2 position, float heading)
     {
@@ -186,6 +230,12 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
 
         if (!MoveShip(s, input, dt, locked, predicting: false)) return;
 
+        if (Chaos.Get(ChaosKind.BlackHole) is { } hole && !s.IsProtected && Map.Distance(s.Position, hole.Point) < BlackHoleKillRadius)
+        {
+            Kill(s, null, DeathCause.BlackHole);
+            return;
+        }
+
         if (CanFire(s, input)) FireBullet(s);
 
         bool grabPressed = input.Grab && !s.GrabHeld;
@@ -212,8 +262,8 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
             fired = CanFire(s, input);
             if (fired)
             {
-                s.FireCooldown = Config.FireCooldown;
-                s.Fuel -= Config.FireFuel;
+                s.FireCooldown = FireCooldownTime;
+                s.Fuel -= FireFuel;
                 s.SpawnProtection = 0f;
             }
             s.GrabHeld = input.Grab;
@@ -228,8 +278,11 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         return fired;
     }
 
+    /// <summary>Ships this close to a black hole's centre are torn apart.</summary>
+    public const float BlackHoleKillRadius = 22f;
+
     private bool CanFire(Ship s, ShipInput input) =>
-        input.Fire && !s.Shield && Rules.WeaponsEnabled && s.FireCooldown <= 0f && s.Fuel >= Config.FireFuel;
+        input.Fire && !s.Shield && Rules.WeaponsEnabled && s.FireCooldown <= 0f && s.Fuel >= FireFuel;
 
     /// <summary>Turning, shield, thrust, gravity, movement, walls and refueling.</summary>
     /// <returns>False if the controls are locked or the ship crashed.</returns>
@@ -237,6 +290,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
     {
         var cfg = Config;
         float turn = Math.Clamp(input.Turn, -1f, 1f);
+        if (Chaos.Has(ChaosKind.ReversedControls)) turn = -turn;
         s.Heading = MathUtil.WrapAngle(s.Heading + turn * cfg.TurnSpeed * dt);
         if (locked)
         {
@@ -248,18 +302,24 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         s.SpawnProtection = MathF.Max(0f, s.SpawnProtection - dt);
         s.FireCooldown = MathF.Max(0f, s.FireCooldown - dt);
 
-        s.Shield = input.Shield && s.Fuel > 0f;
-        if (s.Shield) s.Fuel -= cfg.ShieldFuelPerSec * dt;
+        float fuelUse = FuelUse;
+        s.Shield = input.Shield && s.Fuel > 0f && !Chaos.Has(ChaosKind.ShieldJam);
+        if (s.Shield) s.Fuel -= cfg.ShieldFuelPerSec * fuelUse * dt;
 
+        bool turbo = Chaos.Has(ChaosKind.Turbo);
         s.Thrusting = input.Thrust && s.Fuel > 0f;
         var accel = GravityAt(s.Position);
         if (s.Thrusting)
         {
-            accel += MathUtil.FromAngle(s.Heading) * cfg.ThrustAccel;
-            s.Fuel -= cfg.ThrustFuelPerSec * dt;
+            accel += MathUtil.FromAngle(s.Heading) * (cfg.ThrustAccel * (turbo ? 2f : 1f));
+            s.Fuel -= cfg.ThrustFuelPerSec * fuelUse * dt;
         }
 
-        s.Velocity = MathUtil.ClampLength(s.Velocity + accel * dt, cfg.MaxSpeed);
+        // Above the top speed (when turbo ends), slow down over a moment rather than all at once.
+        float previousSpeed = s.Velocity.Length();
+        float limit = MathF.Max(cfg.MaxSpeed * (turbo ? 1.5f : 1f), MathF.Min(previousSpeed, cfg.MaxSpeed * 1.5f) - 600f * dt);
+        s.Velocity = MathUtil.ClampLength(s.Velocity + accel * dt, limit);
+        if (Chaos.Has(ChaosKind.ThickAir)) s.Velocity *= 1f - 1.6f * dt;
         s.Position = Map.WrapPosition(s.Position + s.Velocity * dt);
 
         ResolveWallCollisions(s, predicting);
@@ -392,8 +452,8 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
         var cfg = Config;
         var dir = MathUtil.FromAngle(s.Heading);
         var position = Map.WrapPosition(s.Position + dir * (cfg.ShipRadius + 3f));
-        s.FireCooldown = cfg.FireCooldown;
-        s.Fuel -= cfg.FireFuel;
+        s.FireCooldown = FireCooldownTime;
+        s.Fuel -= FireFuel;
         s.SpawnProtection = 0f;
         Emit(new GameEvent(GameEventType.ShipFired, s.Id, Position: position));
 
@@ -416,6 +476,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
     private void ResolveWallCollisions(Ship s, bool predicting)
     {
         var cfg = Config;
+        bool rubber = Chaos.Has(ChaosKind.RubberWalls);
         for (int iteration = 0; iteration < 4; iteration++)
         {
             if (!Map.FindDeepestContact(s.Position, cfg.ShipRadius, out var n, out float depth)) break;
@@ -424,7 +485,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
             float vn = Vector2.Dot(s.Velocity, n);
             if (vn >= 0f) continue;
             float impact = -vn;
-            if (impact > cfg.CrashSpeed)
+            if (impact > cfg.CrashSpeed && !rubber)
             {
                 if (!s.IsProtected && !predicting)
                 {
@@ -435,7 +496,7 @@ public sealed class World(Map map, GameConfig config, IGameRules rules, int seed
             }
 
             var tangential = s.Velocity - n * vn;
-            s.Velocity = tangential * cfg.WallFriction - n * (vn * cfg.WallRestitution);
+            s.Velocity = rubber ? tangential - n * (vn * 0.95f) : tangential * cfg.WallFriction - n * (vn * cfg.WallRestitution);
             if (impact > 40f && !predicting)
             {
                 Emit(new GameEvent(GameEventType.WallBounce, s.Id, Position: s.Position - n * cfg.ShipRadius, Value: impact));

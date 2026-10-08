@@ -13,7 +13,14 @@ public sealed class ServerOptions
     public BotDifficulty Difficulty { get; set; } = BotDifficulty.Normal;
     public int ScoreLimit { get; set; } = 10;
     public int CaptureLimit { get; set; } = 3;
+    public int TeamScoreLimit { get; set; } = 20;
+    public int Lives { get; set; } = 3;
+    public int HillScoreLimit { get; set; } = 60;
     public float? TimeLimit { get; set; }
+    /// <summary>The mode to play every map in (when it can be); null plays each map's own mode.</summary>
+    public GameModeKind? Mode { get; set; }
+    /// <summary>Physics and random events; null is the standard game with no events.</summary>
+    public GameConfig? Config { get; set; }
     public int? Laps { get; set; }
     public float IntermissionSeconds { get; set; } = Protocol.IntermissionSeconds;
     /// <summary>Play the maps in random order (never the same one twice in a row) instead of in turn.</summary>
@@ -211,13 +218,18 @@ public sealed class GameServer
         var match = new Match(new MatchSetup
         {
             Map = map,
+            Mode = _options.Mode,
             IncludePlayer = false,
             BotCount = _options.BotCount,
             Difficulty = _options.Difficulty,
             ScoreLimit = _options.ScoreLimit,
             CaptureLimit = _options.CaptureLimit,
+            TeamScoreLimit = _options.TeamScoreLimit,
+            Lives = _options.Lives,
+            HillScoreLimit = _options.HillScoreLimit,
             TimeLimit = _options.TimeLimit,
             Laps = _options.Laps,
+            Config = _options.Config,
             Seed = _rng.Next(),
         });
         Match = match;
@@ -233,7 +245,7 @@ public sealed class GameServer
             client.LastInput = default;
             SendMatchStart(client);
         }
-        Log?.Invoke($"Match {_matchId}: {map.Name} ({map.Mode})");
+        Log?.Invoke($"Match {_matchId}: {map.Name} ({GameModes.Name(match.World.Rules.Mode)})");
         return match;
     }
 
@@ -251,6 +263,10 @@ public sealed class GameServer
             CaptureLimit = setup.CaptureLimit,
             TimeLimit = setup.TimeLimit,
             Laps = setup.Laps,
+            Mode = Match.World.Rules.Mode,
+            TeamScoreLimit = setup.TeamScoreLimit,
+            Lives = setup.Lives,
+            HillScoreLimit = setup.HillScoreLimit,
         };
         client.Connection.Send(msg.Encode(), Delivery.Reliable);
     }
@@ -320,12 +336,15 @@ public sealed class GameServer
         var world = Match.World;
         var rulesStream = new MemoryStream();
         world.Rules.WriteState(new BinaryWriter(rulesStream));
+        var chaosStream = new MemoryStream();
+        world.Chaos.WriteState(new BinaryWriter(chaosStream));
         var snapshot = new Snapshot
         {
             MatchId = _matchId,
             Tick = world.Tick,
             Intermission = _intermission,
             RulesState = rulesStream.ToArray(),
+            ChaosState = chaosStream.ToArray(),
             Ships = world.Ships.Select(ShipState.From).ToList(),
             Balls = world.Balls.Select(BallSnapshot.From).ToList(),
         };

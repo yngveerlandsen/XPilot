@@ -110,6 +110,41 @@ public class NetworkGameTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Clients_PlayTheServersMode_AndFeelItsEvents()
+    {
+        var options = new ServerOptions
+        {
+            Mode = GameModeKind.KingOfTheHill,
+            Config = new RuleOptions { Events = EventFrequency.Chaos, EventSeconds = 3, GravityPercent = 150 }.CreateConfig(),
+        };
+        var game = new SimulatedGame(Server(bots: 2, options: options), new SimulatedNetwork(seed: 7) { Latency = 0.08, Jitter = 0.02, Loss = 0.03 });
+        var client = game.Join("Pilot", Weave);
+        game.Run(1);
+
+        var rules = Assert.IsType<XPilot.Core.Rules.KingOfTheHillRules>(client.World.Rules);
+        Assert.Equal(1.5f, client.World.Config.GravityScale);
+        Assert.Equal(((XPilot.Core.Rules.KingOfTheHillRules)game.Server.Match.World.Rules).Hill, rules.Hill);
+
+        var errors = new List<float>();
+        var kinds = new HashSet<ChaosKind>();
+        int lastTick = -1;
+        game.Run(30, () =>
+        {
+            foreach (var e in client.World.Chaos.Active) kinds.Add(e.Kind);
+            if (client.LatestTick == lastTick) return;
+            lastTick = client.LatestTick;
+            if (client.PredictedShip.Alive) errors.Add(client.LastPredictionError);
+        });
+
+        errors.Sort();
+        float median = errors[errors.Count / 2], p95 = errors[(int)(errors.Count * 0.95)];
+        output.WriteLine($"events seen: {string.Join(", ", kinds)}; median={median:F3}px p95={p95:F2}px");
+        Assert.True(kinds.Count >= 3, "the client should mirror the server's events");
+        Assert.True(median < 0.5f, $"median prediction error {median:F2}px");
+        Assert.True(p95 < 25f, $"95th percentile prediction error {p95:F2}px");
+    }
+
+    [Fact]
     public void PlayerInput_MovesTheShipOnTheServer()
     {
         var game = new SimulatedGame(Server(bots: 0), new SimulatedNetwork());

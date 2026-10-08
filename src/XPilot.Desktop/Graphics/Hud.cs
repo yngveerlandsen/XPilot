@@ -105,9 +105,13 @@ public sealed class Hud
         DrawRadarObjects(pb, radar, match, time);
         DrawFeed(pb, vp, radar, s);
 
+        float infoBottom = 46 * s;
         if (world.Rules is RaceRules race) DrawRaceInfo(pb, vp, s, match, race);
         else if (world.Rules is DogfightRules dogfight) DrawDogfightInfo(pb, vp, s, match, dogfight);
-        else if (world.Rules is BallRules ball) DrawBallInfo(pb, vp, s, match, ball, time);
+        else if (world.Rules is ITeamRules team) DrawTeamInfo(pb, vp, s, match, team, time);
+        else if (world.Rules is EliminationRules elimination) DrawEliminationInfo(pb, vp, s, match, elimination);
+        else if (world.Rules is KingOfTheHillRules hill) infoBottom = DrawHillInfo(pb, vp, s, match, hill);
+        DrawEvents(pb, vp, s, world, infoBottom + 26 * s, time);
 
         if (player != null) DrawShipStatus(pb, vp, s, world, player, time);
         DrawCenterMessage(pb, vp, s);
@@ -158,6 +162,16 @@ public sealed class Hud
             if (ball.State == BallState.Loose && ((int)(time * 6f) & 1) == 1) continue;
             pb.Circle(ToRadar(ball.Position), 3f, 1.5f, Palette.Team(ball.Team), 10);
         }
+        if (match.World.Rules is KingOfTheHillRules hill)
+        {
+            float r = MathF.Max(3f, KingOfTheHillRules.HillRadius / Map.TileSize * scale);
+            pb.Circle(ToRadar(hill.Hill), r, 1.5f, Palette.Hill * (0.6f + 0.4f * MathF.Sin(time * 4f)), 16);
+        }
+        if (match.World.Chaos.Get(ChaosKind.BlackHole) is { } hole)
+        {
+            pb.FilledCircle(ToRadar(hole.Point), 3f, Palette.Chaos, 10);
+            pb.Circle(ToRadar(hole.Point), 6f + 2f * MathF.Sin(time * 6f), 1f, Palette.Chaos * 0.6f, 12);
+        }
 
         if (match.World.Rules.Mode == GameModeKind.Race)
         {
@@ -170,9 +184,10 @@ public sealed class Hud
         }
 
         bool blink = ((int)(time * 4f) & 1) == 0;
+        bool blackout = match.World.Chaos.Has(ChaosKind.Blackout);
         foreach (var ship in match.World.Ships)
         {
-            if (!ship.Alive) continue;
+            if (!ship.Alive || (blackout && ship != match.Player)) continue;
             var p = ToRadar(ship.Position);
             if (ship == match.Player)
             {
@@ -197,7 +212,8 @@ public sealed class Hud
         }
     }
 
-    private static void DrawBallInfo(PrimitiveBatch pb, Viewport vp, float s, IMatchView match, BallRules rules, float time)
+    /// <summary>Ball mode and team dogfight: the team score, and in ball mode where the balls are.</summary>
+    private static void DrawTeamInfo(PrimitiveBatch pb, Viewport vp, float s, IMatchView match, ITeamRules rules, float time)
     {
         var world = match.World;
         var player = match.Player;
@@ -211,12 +227,13 @@ public sealed class Hud
         VectorFont.Draw(pb, blue, new Vector2(cx + 14 * s, 16 * s), size, Palette.BlueTeam);
 
         string clock = rules.TimeLimit > 0 ? FormatClock(rules.TimeRemaining(world)) + "   " : "";
-        VectorFont.Draw(pb, rules.CaptureLimit > 0 ? $"{clock}FIRST TO {rules.CaptureLimit}" : clock.TrimEnd(), new Vector2(cx, 46 * s), 10f * s, Palette.TextDim, TextAlign.Center);
+        VectorFont.Draw(pb, rules.TeamScoreLimit > 0 ? $"{clock}FIRST TO {rules.TeamScoreLimit}" : clock.TrimEnd(), new Vector2(cx, 46 * s), 10f * s, Palette.TextDim, TextAlign.Center);
 
         if (player == null) return;
         var teamColor = Palette.Team(player.Team);
         VectorFont.Draw(pb, $"{Teams.Name(player.Team).ToUpperInvariant()} TEAM", new Vector2(16 * s, 16 * s), 22f * s, teamColor);
         VectorFont.Draw(pb, $"SCORE {player.Score}   KILLS {player.Kills}   DEATHS {player.Deaths}", new Vector2(16 * s, 48 * s), 11f * s, Palette.TextDim);
+        if (rules is not BallRules) return;
 
         float y = 70 * s;
         foreach (var ball in world.Balls)
@@ -234,6 +251,83 @@ public sealed class Hud
             var color = alarm && ((int)(time * 4f) & 1) == 0 ? Palette.Warning : Palette.Team(ball.Team);
             VectorFont.Draw(pb, $"{(ours ? "OUR" : "ENEMY")} BALL: {state}", new Vector2(16 * s, y), 11f * s, color);
             y += 18 * s;
+        }
+    }
+
+    private static void DrawEliminationInfo(PrimitiveBatch pb, Viewport vp, float s, IMatchView match, EliminationRules rules)
+    {
+        var world = match.World;
+        var player = match.Player;
+        if (player != null)
+        {
+            bool isOut = rules.IsEliminated(player);
+            VectorFont.Draw(pb, isOut ? "ELIMINATED" : $"LIVES {player.Score}", new Vector2(16 * s, 16 * s), 22f * s, isOut ? Palette.Warning : Palette.Accent);
+            VectorFont.Draw(pb, $"KILLS {player.Kills}   DEATHS {player.Deaths}", new Vector2(16 * s, 48 * s), 11f * s, Palette.TextDim);
+        }
+        int left = rules.Remaining(world);
+        VectorFont.Draw(pb, $"{left} {(left == 1 ? "PILOT" : "PILOTS")} LEFT", new Vector2(16 * s, 68 * s), 11f * s, Palette.TextDim);
+        if (rules.TimeLimit > 0)
+        {
+            float remaining = rules.TimeRemaining(world);
+            VectorFont.Draw(pb, FormatClock(remaining), new Vector2(vp.Width / 2f, 16 * s), 20f * s, remaining < 30f ? Palette.Warning : Palette.Text, TextAlign.Center);
+        }
+    }
+
+    /// <returns>Where the centre column of text ends.</returns>
+    private static float DrawHillInfo(PrimitiveBatch pb, Viewport vp, float s, IMatchView match, KingOfTheHillRules rules)
+    {
+        var world = match.World;
+        var player = match.Player;
+        float cx = vp.Width / 2f;
+        if (player != null)
+        {
+            VectorFont.Draw(pb, rules.ScoreLimit > 0 ? $"HILL {player.Score}/{rules.ScoreLimit}" : $"HILL {player.Score}", new Vector2(16 * s, 16 * s), 22f * s, Palette.Hill);
+            VectorFont.Draw(pb, $"KILLS {player.Kills}   DEATHS {player.Deaths}", new Vector2(16 * s, 48 * s), 11f * s, Palette.TextDim);
+            var standings = rules.GetStandings(world);
+            int rank = standings.ToList().IndexOf(player) + 1;
+            VectorFont.Draw(pb, $"RANK {rank}/{standings.Count}", new Vector2(16 * s, 68 * s), 11f * s, Palette.TextDim);
+        }
+
+        float y = 16 * s;
+        if (rules.TimeLimit > 0)
+        {
+            float remaining = rules.TimeRemaining(world);
+            VectorFont.Draw(pb, FormatClock(remaining), new Vector2(cx, y), 20f * s, remaining < 30f ? Palette.Warning : Palette.Text, TextAlign.Center);
+            y += 30 * s;
+        }
+        var holder = world.GetShip(rules.Holder);
+        var (status, color) = rules.Holder switch
+        {
+            KingOfTheHillRules.Contested => ("HILL CONTESTED", Palette.Warning),
+            _ when holder == null => ("THE HILL IS EMPTY", Palette.TextDim),
+            _ when holder == player => ("YOU HOLD THE HILL", Palette.Hill),
+            _ => ($"{holder.Name.ToUpperInvariant()} HOLDS THE HILL", Palette.Ship(holder)),
+        };
+        VectorFont.Draw(pb, status, new Vector2(cx, y), 12f * s, color, TextAlign.Center);
+        y += 20 * s;
+        float moves = MathF.Max(0f, rules.NextMove - world.Time);
+        VectorFont.Draw(pb, $"HILL MOVES IN {MathF.Ceiling(moves)}", new Vector2(cx, y), 10f * s, moves < 5f ? Palette.Warning : Palette.TextDim, TextAlign.Center);
+        return y;
+    }
+
+    /// <summary>The random events running, each with a bar showing how long it has left, and the one about to start.</summary>
+    private static void DrawEvents(PrimitiveBatch pb, Viewport vp, float s, World world, float y, float time)
+    {
+        float cx = vp.Width / 2f;
+        foreach (var e in world.Chaos.Active)
+        {
+            string name = ChaosDirector.Name(e.Kind).ToUpperInvariant();
+            VectorFont.Draw(pb, name, new Vector2(cx, y), 14f * s, Palette.Chaos, TextAlign.Center);
+            float w = MathF.Max(VectorFont.Measure(name, 14f * s), 120f * s);
+            float fraction = e.Duration > 0f ? Math.Clamp(e.Remaining / e.Duration, 0f, 1f) : 0f;
+            var barColor = e.Remaining < 2f && ((int)(time * 6f) & 1) == 0 ? Palette.Warning : Palette.Chaos;
+            pb.Rect(cx - w / 2f, y + 22 * s, w * fraction, 3f * s, barColor * 0.8f);
+            y += 36 * s;
+        }
+        if (world.Chaos.Incoming is { } incoming && ((int)(time * 4f) & 1) == 0)
+        {
+            VectorFont.Draw(pb, $"INCOMING: {ChaosDirector.Name(incoming.Kind).ToUpperInvariant()} IN {MathF.Ceiling(incoming.Remaining)}",
+                new Vector2(cx, y), 12f * s, Palette.Chaos, TextAlign.Center);
         }
     }
 
@@ -308,7 +402,11 @@ public sealed class Hud
             VectorFont.Draw(pb, "SHIELD", new Vector2(x + barW + 20 * s, y - 2 * s), 12f * s, shieldColor);
         }
 
-        if (!player.Alive && !world.Rules.IsOver)
+        if (!player.Alive && world.Rules.IsEliminated(player))
+        {
+            VectorFont.Draw(pb, "YOU ARE OUT - WATCHING THE REST", new Vector2(vp.Width / 2f, vp.Height * 0.62f), 14f * s, Palette.TextDim, TextAlign.Center);
+        }
+        else if (!player.Alive && !world.Rules.IsOver)
         {
             VectorFont.Draw(pb, $"RESPAWN IN {MathF.Max(0f, player.RespawnTimer):0.0}",
                 new Vector2(vp.Width / 2f, vp.Height * 0.62f), 16f * s, Palette.Text, TextAlign.Center);
@@ -359,6 +457,12 @@ public sealed class Hud
         var world = match.World;
         var standings = world.Rules.GetStandings(world);
         bool race = world.Rules.Mode == GameModeKind.Race;
+        string scoreHeader = world.Rules switch
+        {
+            EliminationRules => "LIVES",
+            KingOfTheHillRules => "HILL",
+            _ => "SCORE",
+        };
         float rowH = 26f * s;
         float w = 560f * s, h = (standings.Count + 2) * rowH + 30f * s;
         float x = (vp.Width - w) / 2f, y = (vp.Height - h) / 2f;
@@ -382,7 +486,7 @@ public sealed class Hud
         }
         else
         {
-            VectorFont.Draw(pb, "SCORE", new Vector2(x + 330 * s, ty), size, header, TextAlign.Right);
+            VectorFont.Draw(pb, scoreHeader, new Vector2(x + 330 * s, ty), size, header, TextAlign.Right);
             VectorFont.Draw(pb, "KILLS", new Vector2(x + 430 * s, ty), size, header, TextAlign.Right);
             VectorFont.Draw(pb, "DEATHS", new Vector2(x + 530 * s, ty), size, header, TextAlign.Right);
         }
@@ -396,9 +500,10 @@ public sealed class Hud
             {
                 pb.Rect(x + 8 * s, ty - 6 * s, w - 16 * s, rowH - 2 * s, color * 0.12f);
             }
-            string rank = world.Rules is BallRules ball
-                ? $"{Teams.Name(ship.Team)[0]}{ball.TeamScore(ship.Team)}"
+            string rank = world.Rules is ITeamRules teams
+                ? $"{Teams.Name(ship.Team)[0]}{teams.TeamScore(ship.Team)}"
                 : (i + 1).ToString();
+            if (world.Rules.IsEliminated(ship)) color *= 0.5f;
             VectorFont.Draw(pb, rank, new Vector2(x + 20 * s, ty), size, color);
             VectorFont.Draw(pb, ship.Name, new Vector2(x + 60 * s, ty), size, color);
             if (race)

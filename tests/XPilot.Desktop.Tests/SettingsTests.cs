@@ -7,6 +7,40 @@ namespace XPilot.Desktop.Tests;
 public class SettingsTests
 {
     [Fact]
+    public void MatchRules_RoundTrip_WithReadableNames()
+    {
+        var settings = new Settings { Lives = 5, Mode = "KingOfTheHill" };
+        settings.Rules.GravityPercent = 200;
+        settings.Rules.Walls = Core.WallDamage.Off;
+        settings.Rules.Events = Core.Simulation.EventFrequency.Chaos;
+        settings.Rules.SetEventEnabled(Core.Simulation.ChaosKind.Blackout, false);
+        settings.SetLastMap(Core.Maps.GameModeKind.KingOfTheHill, "Arena");
+        settings.SetLastMap(Core.Maps.GameModeKind.Race, "Oval");
+
+        string json = settings.ToJson();
+        Assert.Contains("\"Chaos\"", json);
+        Assert.Contains("\"Blackout\"", json);
+        var copy = Settings.Parse(json);
+        Assert.Equal(5, copy.Lives);
+        Assert.Equal(200, copy.Rules.GravityPercent);
+        Assert.Equal(Core.WallDamage.Off, copy.Rules.Walls);
+        Assert.Equal(Core.Simulation.EventFrequency.Chaos, copy.Rules.Events);
+        Assert.False(copy.Rules.IsEventEnabled(Core.Simulation.ChaosKind.Blackout));
+        Assert.Equal("Arena", copy.LastMap(Core.Maps.GameModeKind.KingOfTheHill));
+        Assert.Equal("Oval", copy.LastRaceMap);
+    }
+
+    [Fact]
+    public void OlderSettings_GetTheStandardRulesWithEvents()
+    {
+        var settings = Settings.Parse("""{ "Version": 1, "ScoreLimit": 15 }""");
+        Assert.Equal(15, settings.ScoreLimit);
+        Assert.True(settings.Rules.IsStandardPhysics);
+        Assert.Equal(Core.Simulation.EventFrequency.Normal, settings.Rules.Events);
+        Assert.Equal(20, settings.TeamScoreLimit);
+    }
+
+    [Fact]
     public void Rebind_ToAFreeKey_MakesItTheOnlyKey()
     {
         var settings = new Settings();

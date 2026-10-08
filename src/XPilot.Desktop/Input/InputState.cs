@@ -40,6 +40,10 @@ public sealed class InputState
     public bool MenuRight => WasPressed(Keys.Right) || WasPressed(Keys.D) || WasPressed(Buttons.DPadRight) || WasPressed(Buttons.LeftThumbstickRight);
     public bool MenuSelect => WasPressed(Keys.Enter) || WasPressed(Keys.Space) || WasPressed(Buttons.A) || WasPressed(Buttons.Start);
     public bool MenuBack => WasPressed(Keys.Escape) || WasPressed(Buttons.B) || WasPressed(Buttons.Back);
+    /// <summary>The previous page of a tabbed menu: the left bumper, or Page Up.</summary>
+    public bool MenuPagePrevious => WasPressed(Buttons.LeftShoulder) || WasPressed(Keys.PageUp);
+    /// <summary>The next page of a tabbed menu: the right bumper, or Page Down.</summary>
+    public bool MenuPageNext => WasPressed(Buttons.RightShoulder) || WasPressed(Keys.PageDown);
     public bool Pause => WasPressed(Keys.Escape) || WasPressed(Keys.P) || WasPressed(Buttons.Start);
 
     /// <summary>Applies this frame's typing (printable characters and backspace) to a text field.</summary>

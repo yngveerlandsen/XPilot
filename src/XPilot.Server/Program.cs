@@ -1,6 +1,8 @@
 using System.Globalization;
+using XPilot.Core;
 using XPilot.Core.AI;
 using XPilot.Core.Maps;
+using XPilot.Core.Simulation;
 using XPilot.Net;
 
 CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
@@ -15,6 +17,7 @@ const string Usage = """
       --name <text>          Server name shown in server lists (default "XPilot")
       --port <n>             UDP port (default 15345)
       --mode <mode>          dogfight, race or ball: rotate through every map of that mode (default dogfight).
+                             team, elimination or koth: play that mode on every map that suits it.
                              random: every map of every mode, in random order
       --shuffle              Play the maps in random order instead of in turn
       --map <name>           Play only these maps, in order (repeat or comma-separate). Overrides --mode.
@@ -23,14 +26,31 @@ const string Usage = """
       --difficulty <d>       easy, normal or hard (default normal)
       --score-limit <n>      Dogfight kills to win (default 10, 0 = none)
       --capture-limit <n>    Ball captures to win (default 3)
+      --team-score-limit <n> Team dogfight kills to win (default 20)
+      --lives <n>            Last pilot standing: lives per pilot (default 3)
+      --hill-score <n>       King of the hill: seconds on the hill to win (default 60)
       --time-limit <sec>     Match length in seconds (0 = none)
       --laps <n>             Race laps (default: the map's)
       --master <host:port>   Register with a master server so internet players can find this server
+
+    Physics and random events (percentages are of the normal game):
+      --gravity <pct>        Gravity (default 100)
+      --thrust <pct>         Engine power (default 100)
+      --speed <pct>          Top speed (default 100)
+      --fuel <pct>           Fuel used by thrust, shield and guns; 0 = unlimited (default 100)
+      --bullet-speed <pct>   Bullet speed (default 100)
+      --fire-rate <pct>      Shots per second (default 100)
+      --walls <w>            deadly, forgiving or off: how hard a wall has to be hit to crash (default deadly)
+      --no-ramming           Ships colliding bounce off instead of exploding
+      --events <f>           off, rare, normal, frequent or chaos: how often random events happen (default off)
+      --event-length <sec>   Seconds each event lasts (default 10)
+      --no-event <name>      Never run this event (repeat or comma-separate), e.g. blackout,reversedcontrols
 
       --run-master [port]    Run a master server instead of a game server (default port 15346)
     """;
 
 var options = new ServerOptions();
+var rules = new RuleOptions { Events = EventFrequency.Off };
 var mapNames = new List<string>();
 string mode = "dogfight";
 string mapsDir = Path.Combine(AppContext.BaseDirectory, "maps");
@@ -53,6 +73,25 @@ try
             case "--difficulty": options.Difficulty = Enum.Parse<BotDifficulty>(Next(), true); break;
             case "--score-limit": options.ScoreLimit = int.Parse(Next()); break;
             case "--capture-limit": options.CaptureLimit = int.Parse(Next()); break;
+            case "--team-score-limit": options.TeamScoreLimit = int.Parse(Next()); break;
+            case "--lives": options.Lives = int.Parse(Next()); break;
+            case "--hill-score": options.HillScoreLimit = int.Parse(Next()); break;
+            case "--gravity": rules.GravityPercent = int.Parse(Next()); break;
+            case "--thrust": rules.ThrustPercent = int.Parse(Next()); break;
+            case "--speed": rules.SpeedPercent = int.Parse(Next()); break;
+            case "--fuel": rules.FuelUsagePercent = int.Parse(Next()); break;
+            case "--bullet-speed": rules.BulletSpeedPercent = int.Parse(Next()); break;
+            case "--fire-rate": rules.FireRatePercent = int.Parse(Next()); break;
+            case "--walls": rules.Walls = Enum.Parse<WallDamage>(Next(), true); break;
+            case "--no-ramming": rules.ShipCollisions = false; break;
+            case "--events": rules.Events = Enum.Parse<EventFrequency>(Next(), true); break;
+            case "--event-length": rules.EventSeconds = int.Parse(Next()); break;
+            case "--no-event":
+                foreach (var name in Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    rules.SetEventEnabled(Enum.Parse<ChaosKind>(name, true), false);
+                }
+                break;
             case "--time-limit": options.TimeLimit = float.Parse(Next()); break;
             case "--laps": options.Laps = int.Parse(Next()); break;
             case "--master": options.MasterServer = Next(); break;
@@ -149,14 +188,15 @@ else
         rotation = available.Select(m => m.File).ToList();
         options.ShuffleMaps = true;
     }
-    else if (!Enum.TryParse<GameModeKind>(mode, true, out var kind))
+    else if (GameModes.Parse(mode) is not { } kind)
     {
-        Console.Error.WriteLine($"Unknown mode '{mode}'. Use dogfight, race, ball or random.");
+        Console.Error.WriteLine($"Unknown mode '{mode}'. Use dogfight, team, elimination, koth, race, ball or random.");
         return 1;
     }
     else
     {
-        rotation = available.Where(m => m.Map.Mode == kind).Select(m => m.File).ToList();
+        rotation = available.Where(m => GameModes.Supports(kind, m.Map)).Select(m => m.File).ToList();
+        options.Mode = kind;
     }
     if (rotation.Count == 0)
     {
@@ -165,6 +205,7 @@ else
     }
 }
 
+options.Config = rules.CreateConfig();
 var server = new GameServer(options, rotation.Select(MapLoader.ReadText));
 server.Log += Log;
 using var host = new ServerHost(server);
@@ -175,6 +216,7 @@ if (!host.Start())
     return 1;
 }
 Log($"'{options.Name}' listening on UDP port {host.Port} with {rotation.Count} map(s). Ctrl+C stops it.");
+Log($"Rules: {rules.Summary()}");
 if (options.MasterServer != null) Log($"Registering with master server {options.MasterServer}");
 
 while (!stop.Wait(500))

@@ -47,5 +47,15 @@ public sealed class GameConfig
     /// <summary>How close a ship must be to latch onto a ball.</summary>
     public float GrabRange { get; set; } = 70f;
 
+    /// <summary>Multiplies the map's gravity and attractors.</summary>
+    public float GravityScale { get; set; } = 1f;
+
+    /// <summary>How often random events (<see cref="Simulation.ChaosKind"/>) happen.</summary>
+    public Simulation.EventFrequency Events { get; set; } = Simulation.EventFrequency.Off;
+    /// <summary>Seconds each random event lasts.</summary>
+    public float EventDuration { get; set; } = 10f;
+    /// <summary>Which events may happen: bit n allows <see cref="Simulation.ChaosKind"/> n.</summary>
+    public uint EventMask { get; set; } = Simulation.ChaosDirector.AllEvents;
+
     public GameConfig Clone() => (GameConfig)MemberwiseClone();
 }

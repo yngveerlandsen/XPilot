@@ -1,3 +1,4 @@
+using XPilot.Core;
 using XPilot.Core.Maps;
 
 namespace XPilot.Desktop;
@@ -40,5 +41,6 @@ public sealed class MapCatalog
         return new MapCatalog(maps.OrderBy(m => m.Name).ToList(), errors);
     }
 
-    public IReadOnlyList<Map> ForMode(GameModeKind mode) => Maps.Where(m => m.Mode == mode).ToList();
+    /// <summary>The maps a mode can be played on.</summary>
+    public IReadOnlyList<Map> ForMode(GameModeKind mode) => Maps.Where(m => GameModes.Supports(mode, m)).ToList();
 }

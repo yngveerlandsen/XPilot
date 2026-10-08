@@ -1,5 +1,6 @@
 using System.Numerics;
 using XPilot.Core;
+using XPilot.Core.Maps;
 using XPilot.Core.Simulation;
 
 namespace XPilot.Net.Tests;
@@ -40,7 +41,7 @@ public class MessageTests
     [Fact]
     public void FullSnapshot_FitsInOnePacket()
     {
-        var snap = new Snapshot { RulesState = new byte[16] };
+        var snap = new Snapshot { RulesState = new byte[16], ChaosState = new byte[2 + 3 * 9] };
         for (int i = 0; i < 16; i++) snap.Ships.Add(new ShipState { Id = i });
         snap.Balls.Add(default);
         snap.Balls.Add(default);
@@ -75,6 +76,40 @@ public class MessageTests
         Assert.Equal(700, copy.Config.MaxSpeed);
         Assert.Null(copy.TimeLimit);
         Assert.Equal(4, copy.Laps);
+    }
+
+    [Fact]
+    public void MatchStart_CarriesTheModeAndItsLimits()
+    {
+        var msg = new MatchStartMessage
+        {
+            MapText = "name: X\n---\n_.", Mode = GameModeKind.Elimination, TeamScoreLimit = 30, Lives = 5, HillScoreLimit = 90,
+            Config = new GameConfig { GravityScale = 2f, Events = EventFrequency.Frequent, EventMask = 5 },
+        };
+        var copy = MatchStartMessage.Decode(MessageReader.Open(msg.Encode(), out _));
+        Assert.Equal(GameModeKind.Elimination, copy.Mode);
+        Assert.Equal(30, copy.TeamScoreLimit);
+        Assert.Equal(5, copy.Lives);
+        Assert.Equal(90, copy.HillScoreLimit);
+        Assert.Equal(2f, copy.Config.GravityScale);
+        Assert.Equal(EventFrequency.Frequent, copy.Config.Events);
+        Assert.Equal(5u, copy.Config.EventMask);
+    }
+
+    [Fact]
+    public void Snapshot_CarriesTheRunningEvents()
+    {
+        var world = new World(MapLoader.Parse("name: X\n---\n_..."), new GameConfig(), new XPilot.Core.Rules.DogfightRules());
+        world.Chaos.Start(world, ChaosKind.SolarWind, 7.5f);
+        world.Chaos.Start(world, ChaosKind.BlackHole, 12.25f, new Vector2(1000.4f, -20f));
+        var stream = new MemoryStream();
+        world.Chaos.WriteState(new BinaryWriter(stream));
+        var snap = new Snapshot { ChaosState = stream.ToArray() };
+
+        var copy = Snapshot.Decode(MessageReader.Open(snap.Encode(), out _));
+        var mirror = new World(world.Map, new GameConfig(), new XPilot.Core.Rules.DogfightRules());
+        mirror.Chaos.ReadState(new BinaryReader(new MemoryStream(copy.ChaosState)));
+        Assert.Equal(world.Chaos.Active, mirror.Chaos.Active);
     }
 
     [Theory]

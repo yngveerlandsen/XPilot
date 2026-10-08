@@ -1,12 +1,14 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using XPilot.Core;
+using XPilot.Core.Maps;
 
 namespace XPilot.Desktop;
 
 /// <summary>User preferences, stored in %APPDATA%\XPilot\settings.json.</summary>
 public sealed class Settings
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
 
     /// <summary>
     /// 1: <see cref="MasterServer"/> null means the public default (before, it meant LAN only), and hosted games
@@ -39,6 +41,8 @@ public sealed class Settings
     public string? LastDogfightMap { get; set; }
     public string? LastRaceMap { get; set; }
     public string? LastBallMap { get; set; }
+    /// <summary>The last map played in each of the newer modes, by mode name.</summary>
+    public Dictionary<string, string>? LastMaps { get; set; }
     public int Bots { get; set; } = 3;
     public string Difficulty { get; set; } = "Normal";
 
@@ -51,6 +55,33 @@ public sealed class Settings
     public int TimeLimitMinutes { get; set; } = -1;
     /// <summary>Race laps; 0 uses the map's own lap count.</summary>
     public int Laps { get; set; }
+    /// <summary>Team dogfight kills to win; 0 means no limit.</summary>
+    public int TeamScoreLimit { get; set; } = 20;
+    /// <summary>Lives in last pilot standing.</summary>
+    public int Lives { get; set; } = 3;
+    /// <summary>King of the hill seconds to win; 0 means no limit.</summary>
+    public int HillScoreLimit { get; set; } = 60;
+    /// <summary>Physics and random events for local and hosted games.</summary>
+    public RuleOptions Rules { get; set; } = new();
+
+    public string? LastMap(GameModeKind mode) => mode switch
+    {
+        GameModeKind.Dogfight => LastDogfightMap,
+        GameModeKind.Race => LastRaceMap,
+        GameModeKind.Ball => LastBallMap,
+        _ => LastMaps?.GetValueOrDefault(mode.ToString()),
+    };
+
+    public void SetLastMap(GameModeKind mode, string name)
+    {
+        switch (mode)
+        {
+            case GameModeKind.Dogfight: LastDogfightMap = name; break;
+            case GameModeKind.Race: LastRaceMap = name; break;
+            case GameModeKind.Ball: LastBallMap = name; break;
+            default: (LastMaps ??= [])[mode.ToString()] = name; break;
+        }
+    }
 
     [JsonIgnore]
     public float? TimeLimitSeconds => TimeLimitMinutes < 0 ? null : TimeLimitMinutes * 60f;
@@ -123,12 +154,14 @@ public sealed class Settings
         return settings;
     }
 
+    public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
+
     public void Save()
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOptions));
+            File.WriteAllText(FilePath, ToJson());
         }
         catch (Exception ex)
         {

@@ -138,6 +138,7 @@ public sealed class BotController
         {
             case GameModeKind.Race: ThinkRace(); break;
             case GameModeKind.Ball: ThinkBall(); break;
+            case GameModeKind.KingOfTheHill: ThinkHill(); break;
             default: ThinkDogfight(); break;
         }
         if (_world.Rules.WeaponsEnabled) ThinkShield();
@@ -187,11 +188,30 @@ public sealed class BotController
         SetWaypoint(_path.Count > 0 ? _path[0] : next, false);
     }
 
+    /// <summary>King of the hill: get onto the hill and stay there, shooting whoever else comes.</summary>
+    private void ThinkHill()
+    {
+        UpdateRefueling();
+        _target = PickTarget(out _targetVisible);
+        AimAtTarget();
+        if (_refueling || _world.Rules is not Rules.KingOfTheHillRules hill)
+        {
+            ThinkDogfightMoves();
+            return;
+        }
+        NavigateTo(hill.Hill, true);
+    }
+
     private void ThinkDogfight()
     {
         UpdateRefueling();
         _target = PickTarget(out _targetVisible);
         AimAtTarget();
+        ThinkDogfightMoves();
+    }
+
+    private void ThinkDogfightMoves()
+    {
         _engage = true;
 
         if (_refueling) NavigateTo(Nearest(_world.Map.FuelStations), true);

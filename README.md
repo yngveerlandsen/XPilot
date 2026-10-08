@@ -2,8 +2,11 @@
 
 A modern take on [XPilot](https://en.wikipedia.org/wiki/XPilot): inertia-based ship physics, gravity,
 shields, fuel, and glowing vector graphics, against AI bots or other players over the network.
-Modes: **Dogfight** (free-for-all, first to 10 kills), **Race** (checkpoints and laps) and
-**Capture the ball** (Red vs Blue: tow the enemy ball into your own treasure, first to 3).
+Modes: **Dogfight** (free-for-all, first to 10 kills), **Team dogfight** (Red vs Blue, first to 20 team kills),
+**Last pilot standing** (3 lives each, the last one flying wins), **King of the hill** (hold a moving zone
+alone to score), **Race** (checkpoints and laps) and **Capture the ball** (Red vs Blue: tow the enemy ball
+into your own treasure, first to 3). Random events (heavy gravity, reversed controls, black holes...) shake
+up a match every so often.
 
 ## Install
 
@@ -58,10 +61,16 @@ Pictures folder. Change the preset or rebind any action under *Settings > Contro
 
 ## Settings
 
-*Settings* in the main menu (also in the Esc menu during a game) has five pages:
+*Settings* in the main menu (also in the Esc menu during a game) has eight pages. Page Up/Page Down, or the
+bumpers (LB/RB) on a gamepad, switch pages from anywhere. *Match rules* in the main menu opens the Match page.
 
-- **Game:** name, skill (bots, and race checkpoint size), and match rules for games you play or host: kills or captures to win, time
-  limit and race laps. Also whether other pilots' names show under their ships.
+- **Game:** name, skill (bots, and race checkpoint size), and whether other pilots' names show under their ships.
+- **Match:** for games you play or host: kills, team kills, captures or hill seconds to win, lives in last pilot
+  standing, time limit and race laps.
+- **Physics:** gravity, engine power, top speed, fuel use (down to none), bullet speed, fire rate, how hard walls
+  are (deadly, forgiving or off) and whether ramming kills.
+- **Events:** how often random events happen (off, rare, normal, frequent, or chaos with two at once), how long
+  they last, and each event on or off.
 - **Video:** fullscreen, VSync, antialiasing, screen shake, particle amount and an FPS counter.
 - **Audio:** separate sound effects and music volumes, the track playing (Enter skips to another), and
   muting when the window is in the background.
@@ -82,6 +91,12 @@ Everything is saved as you change it, to `%APPDATA%\XPilot\settings.json`.
 - Capture the ball: fly near the enemy ball and press Grab to tow it on a rope (it drags you around), then pull it
   into your own treasure box. Kill a carrier to make them drop it. Touch your own dropped ball to send it home;
   otherwise it returns by itself after 20 seconds. Teammates cannot hurt each other. Capture = +3, kill = +1.
+- Team dogfight, last pilot standing and king of the hill play on the dogfight maps (and the team modes and the
+  hill on ball maps too). In last pilot standing, someone joining late gets as many lives as the pilot doing
+  worst. In king of the hill, only a pilot alone in the zone scores (a point a second); it moves every 40 seconds.
+- Random events are announced 3 seconds ahead and run for 10 seconds: heavy gravity, zero G, gravity flip,
+  reversed controls, turbo, rapid fire, rubber walls, blackout, shield jam, black hole (it pulls everyone in and
+  destroys ships at its centre), solar wind, unlimited fuel and thick air.
 
 ## Multiplayer
 
@@ -100,6 +115,7 @@ Everything is saved as you change it, to `%APPDATA%\XPilot\settings.json`.
 ```
 dotnet run --project src/XPilot.Server -- --mode ball --bots 4 --name "My server"
 dotnet run --project src/XPilot.Server -- --map arena,caverns --time-limit 300
+dotnet run --project src/XPilot.Server -- --mode koth --events frequent --gravity 150
 dotnet run --project src/XPilot.Server -- --help
 ```
 

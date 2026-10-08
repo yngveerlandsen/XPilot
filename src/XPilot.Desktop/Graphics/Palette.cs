@@ -18,6 +18,9 @@ public static class Palette
     public static readonly Color Accent = new(90, 220, 255);
     public static readonly Color Warning = new(255, 90, 80);
     public static readonly Color Panel = new(4, 8, 20);
+    /// <summary>Random events: banners, the black hole.</summary>
+    public static readonly Color Chaos = new(255, 120, 230);
+    public static readonly Color Hill = new(255, 215, 90);
 
     private static readonly Color[] ShipColors =
     [

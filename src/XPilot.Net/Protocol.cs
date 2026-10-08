@@ -5,7 +5,7 @@ namespace XPilot.Net;
 public static class Protocol
 {
     /// <summary>Bumped whenever the wire format changes; clients and servers must match.</summary>
-    public const int Version = 1;
+    public const int Version = 2;
     /// <summary>The port the original XPilot used.</summary>
     public const int DefaultPort = 15345;
     public const int DefaultMasterPort = 15346;

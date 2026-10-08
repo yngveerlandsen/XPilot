@@ -14,7 +14,11 @@ public enum TileShape : byte
 
 public enum TileSide { Top, Right, Bottom, Left }
 
-public enum GameModeKind { Dogfight, Race, Ball }
+/// <summary>
+/// A way to play. Maps are made for one of the first three; the others play on dogfight (and ball) maps,
+/// see <see cref="GameModes.Supports"/>.
+/// </summary>
+public enum GameModeKind { Dogfight, Race, Ball, TeamDogfight, Elimination, KingOfTheHill }
 
 public static class Teams
 {

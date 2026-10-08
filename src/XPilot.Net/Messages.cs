@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Text.Json;
 using XPilot.Core;
+using XPilot.Core.Maps;
 using XPilot.Core.Simulation;
 
 namespace XPilot.Net;
@@ -18,6 +19,11 @@ public sealed class MatchStartMessage
     public int CaptureLimit;
     public float? TimeLimit;
     public int? Laps;
+    /// <summary>The mode played on this map, which needn't be the map's own.</summary>
+    public GameModeKind Mode;
+    public int TeamScoreLimit;
+    public int Lives;
+    public int HillScoreLimit;
 
     public byte[] Encode()
     {
@@ -32,6 +38,10 @@ public sealed class MatchStartMessage
         w.Write(CaptureLimit);
         w.Write(TimeLimit ?? -1f);
         w.Write(Laps ?? -1);
+        w.Write((byte)Mode);
+        w.Write(TeamScoreLimit);
+        w.Write(Lives);
+        w.Write(HillScoreLimit);
         return m.ToArray();
     }
 
@@ -51,6 +61,11 @@ public sealed class MatchStartMessage
         msg.TimeLimit = time >= 0f ? time : null;
         int laps = r.ReadInt32();
         msg.Laps = laps >= 0 ? laps : null;
+        msg.Mode = (GameModeKind)r.ReadByte();
+        if (!Enum.IsDefined(msg.Mode)) throw new InvalidDataException("Unknown game mode");
+        msg.TeamScoreLimit = r.ReadInt32();
+        msg.Lives = r.ReadInt32();
+        msg.HillScoreLimit = r.ReadInt32();
         return msg;
     }
 }
@@ -257,6 +272,8 @@ public sealed class Snapshot
     /// <summary>Seconds until the next match starts, or a negative number while a match is running.</summary>
     public float Intermission = -1f;
     public byte[] RulesState = [];
+    /// <summary>Random events running or announced (<see cref="ChaosDirector.WriteState"/>).</summary>
+    public byte[] ChaosState = [0, 0];
     public List<ShipState> Ships = [];
     public List<BallSnapshot> Balls = [];
 
@@ -279,6 +296,8 @@ public sealed class Snapshot
         w.Write(Intermission);
         w.Write((short)RulesState.Length);
         w.Write(RulesState);
+        w.Write((byte)ChaosState.Length);
+        w.Write(ChaosState);
         w.Write((ushort)Ships.Count);
         foreach (var s in Ships) s.Write(w);
         w.Write((ushort)Balls.Count);
@@ -296,6 +315,7 @@ public sealed class Snapshot
             Intermission = r.ReadSingle(),
         };
         snap.RulesState = r.ReadBytes(MessageReader.CheckCount(r, r.ReadInt16(), 1));
+        snap.ChaosState = r.ReadBytes(MessageReader.CheckCount(r, r.ReadByte(), 1));
         int ships = MessageReader.CheckCount(r, r.ReadUInt16(), ShipState.Size);
         for (int i = 0; i < ships; i++) snap.Ships.Add(ShipState.Read(r));
         int balls = MessageReader.CheckCount(r, r.ReadUInt16(), BallSnapshot.Size);

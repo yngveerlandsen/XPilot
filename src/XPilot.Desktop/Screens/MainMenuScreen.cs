@@ -12,7 +12,7 @@ namespace XPilot.Desktop.Screens;
 
 public sealed class MainMenuScreen : Screen
 {
-    private enum Item { Mode, Map, Bots, Difficulty, Name, Start, Host, Join, Settings, Quit }
+    private enum Item { Mode, Map, Bots, Difficulty, Name, Start, Host, Join, Rules, Settings, Quit }
 
     private static readonly Item[] Items = Enum.GetValues<Item>();
 
@@ -40,12 +40,23 @@ public sealed class MainMenuScreen : Screen
     private int MaxBots => CurrentMap is { } m ? Math.Min(7, m.Bases.Count - 1) : 0;
     private int MinBots => _mode == GameModeKind.Race ? 0 : 1;
 
-    private static string ModeName(GameModeKind mode) => mode switch
+    private static string ModeName(GameModeKind mode) => GameModes.Name(mode).ToUpperInvariant();
+
+    /// <summary>One line on how the mode is played, with the limits from the settings.</summary>
+    private string ModeHint()
     {
-        GameModeKind.Race => "RACE",
-        GameModeKind.Ball => "CAPTURE THE BALL",
-        _ => "DOGFIGHT",
-    };
+        var s = Game.Settings;
+        string Goal(int limit, string what) => limit > 0 ? $"FIRST TO {limit} {what}" : "NO LIMIT";
+        return _mode switch
+        {
+            GameModeKind.TeamDogfight => $"RED VS BLUE - {Goal(s.TeamScoreLimit, "TEAM KILLS")}",
+            GameModeKind.Elimination => $"{s.Lives} {(s.Lives == 1 ? "LIFE" : "LIVES")} EACH - THE LAST PILOT FLYING WINS",
+            GameModeKind.KingOfTheHill => $"HOLD THE HILL ALONE TO SCORE - {Goal(s.HillScoreLimit, "SECONDS")} - IT MOVES",
+            GameModeKind.Ball => $"TOW THE ENEMY BALL HOME - {Goal(s.CaptureLimit, "CAPTURES")}",
+            GameModeKind.Race => "FLY THROUGH THE CHECKPOINTS IN ORDER",
+            _ => $"EVERY PILOT FOR THEMSELVES - {Goal(s.ScoreLimit, "KILLS")}",
+        };
+    }
 
     public override void Enter() => Sounds.StopAll();
 
@@ -98,7 +109,8 @@ public sealed class MainMenuScreen : Screen
         switch (Items[_selected])
         {
             case Item.Mode:
-                _mode = (GameModeKind)(((int)_mode + delta + 3) % 3);
+                int index = Array.IndexOf(GameModes.All, _mode);
+                _mode = GameModes.All[(index + delta + GameModes.All.Length) % GameModes.All.Length];
                 SelectRememberedMap();
                 break;
             case Item.Map:
@@ -137,6 +149,11 @@ public sealed class MainMenuScreen : Screen
                 Sounds.Play("select", 0.6f);
                 Game.SetScreen(new SettingsScreen(Game));
                 break;
+            case Item.Rules:
+                if (CurrentMap is { } rulesMap) RememberChoices(rulesMap);
+                Sounds.Play("select", 0.6f);
+                Game.SetScreen(new SettingsScreen(Game, SettingsPage.Match));
+                break;
             case Item.Name:
                 _editingName = Game.Settings.PlayerName;
                 break;
@@ -155,16 +172,22 @@ public sealed class MainMenuScreen : Screen
         if (map == null) return;
         RememberChoices(map);
         Sounds.Play("go", 0.7f);
+        var s = Game.Settings;
         Game.SetScreen(new PlayScreen(Game, new MatchSetup
         {
             Map = map,
+            Mode = _mode,
             BotCount = _bots,
             Difficulty = _difficulty,
-            PlayerName = Game.Settings.PlayerName,
-            ScoreLimit = Game.Settings.ScoreLimit,
-            CaptureLimit = Game.Settings.CaptureLimit,
-            TimeLimit = Game.Settings.TimeLimitSeconds,
-            Laps = Game.Settings.LapsOrDefault,
+            PlayerName = s.PlayerName,
+            ScoreLimit = s.ScoreLimit,
+            CaptureLimit = s.CaptureLimit,
+            TeamScoreLimit = s.TeamScoreLimit,
+            Lives = s.Lives,
+            HillScoreLimit = s.HillScoreLimit,
+            TimeLimit = s.TimeLimitSeconds,
+            Laps = s.LapsOrDefault,
+            Config = s.Rules.CreateConfig(),
         }));
     }
 
@@ -191,8 +214,13 @@ public sealed class MainMenuScreen : Screen
             MasterServer = s.ListHostedGames ? s.EffectiveMasterServer : null,
             ScoreLimit = s.ScoreLimit,
             CaptureLimit = s.CaptureLimit,
+            TeamScoreLimit = s.TeamScoreLimit,
+            Lives = s.Lives,
+            HillScoreLimit = s.HillScoreLimit,
             TimeLimit = s.TimeLimitSeconds,
             Laps = s.LapsOrDefault,
+            Mode = _mode,
+            Config = s.Rules.CreateConfig(),
         };
         var host = new ServerHost(new GameServer(options, rotation));
         if (!host.Start())
@@ -215,12 +243,7 @@ public sealed class MainMenuScreen : Screen
         s.Mode = _mode.ToString();
         s.Bots = _bots;
         s.Difficulty = _difficulty.ToString();
-        switch (_mode)
-        {
-            case GameModeKind.Race: s.LastRaceMap = map.Name; break;
-            case GameModeKind.Ball: s.LastBallMap = map.Name; break;
-            default: s.LastDogfightMap = map.Name; break;
-        }
+        s.SetLastMap(_mode, map.Name);
         s.Save();
     }
 
@@ -229,12 +252,7 @@ public sealed class MainMenuScreen : Screen
 
     private void SelectRememberedMap()
     {
-        var name = _mode switch
-        {
-            GameModeKind.Race => Game.Settings.LastRaceMap,
-            GameModeKind.Ball => Game.Settings.LastBallMap,
-            _ => Game.Settings.LastDogfightMap,
-        };
+        var name = Game.Settings.LastMap(_mode);
         var maps = MapsForMode;
         _mapIndex = 0;
         for (int i = 0; i < maps.Count; i++)
@@ -279,6 +297,7 @@ public sealed class MainMenuScreen : Screen
                 Item.Start => ("PLAY " + ModeName(_mode) + " VS BOTS", null),
                 Item.Host => ("HOST " + ModeName(_mode) + " GAME", null),
                 Item.Join => ("JOIN NETWORK GAME", null),
+                Item.Rules => ("MATCH RULES", null),
                 Item.Settings => ("SETTINGS", null),
                 _ => ("QUIT", (string?)null),
             };
@@ -294,7 +313,7 @@ public sealed class MainMenuScreen : Screen
             {
                 VectorFont.Draw(pb, selected ? $">  {label}  <" : label, new Vector2(cx, y), size, color, TextAlign.Center);
             }
-            y += size + 14 * s;
+            y += size + (item is Item.Start or Item.Host or Item.Join ? 14 : 12) * s;
         }
 
         if (_message != null)
@@ -303,11 +322,15 @@ public sealed class MainMenuScreen : Screen
             y += 20 * s;
         }
 
-        if (CurrentMap is { } map)
+        y += 8 * s;
+        VectorFont.Draw(pb, ModeHint(), new Vector2(cx, y), 10f * s, Palette.Accent * 0.8f, TextAlign.Center);
+        if (CurrentMap is { } map && map.Description.Length > 0)
         {
-            y += 10 * s;
+            y += 18 * s;
             VectorFont.Draw(pb, map.Description, new Vector2(cx, y), 10f * s, Palette.TextDim, TextAlign.Center);
         }
+        y += 18 * s;
+        VectorFont.Draw(pb, "RULES: " + Game.Settings.Rules.Summary().ToUpperInvariant(), new Vector2(cx, y), 9f * s, Palette.TextDim * 0.8f, TextAlign.Center);
 
         float hy = vp.Height - 90 * s;
         string controls = $"TURN {bindings.Describe(GameAction.TurnLeft)} {bindings.Describe(GameAction.TurnRight)}   " +
