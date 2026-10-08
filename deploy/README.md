@@ -39,7 +39,7 @@ listening, it switches back to the previous release. The five newest releases ar
 
 ## Changing the game
 
-Settings are in `/etc/xpilot/server.env` on the server: the server name, mode (`dogfight`, `race`, `ball`, or `random` for every map of every mode in shuffled order),
+Settings are in `/etc/xpilot/server.env` on the server: the server name, mode (`dogfight`, `team`, `elimination`, `koth`, `race`, `ball`, or `random` for every map of every mode in shuffled order),
 number of bots, bot skill, and any other options such as `--map arena,caverns` or `--time-limit 300`
 (`XPilot.Server --help` lists them all). After editing:
 

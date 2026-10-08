@@ -62,6 +62,29 @@ public sealed class PrimitiveBatch : IDisposable
         Triangle(a, c, d, color);
     }
 
+    /// <summary>A filled ring, shading from <paramref name="innerColor"/> to <paramref name="outerColor"/>.</summary>
+    public void Ring(Vector2 center, float inner, float outer, Color innerColor, Color outerColor, int segments = 64)
+    {
+        Ensure(segments * 6);
+        var prev = new Vector2(1f, 0f);
+        for (int i = 1; i <= segments; i++)
+        {
+            float a = i * MathF.Tau / segments;
+            var dir = new Vector2(MathF.Cos(a), MathF.Sin(a));
+            var a0 = new VertexPositionColor(new Vector3(center + prev * inner, 0), innerColor);
+            var a1 = new VertexPositionColor(new Vector3(center + dir * inner, 0), innerColor);
+            var b0 = new VertexPositionColor(new Vector3(center + prev * outer, 0), outerColor);
+            var b1 = new VertexPositionColor(new Vector3(center + dir * outer, 0), outerColor);
+            _vertices[_count++] = a0;
+            _vertices[_count++] = b0;
+            _vertices[_count++] = b1;
+            _vertices[_count++] = a0;
+            _vertices[_count++] = b1;
+            _vertices[_count++] = a1;
+            prev = dir;
+        }
+    }
+
     public void Rect(float x, float y, float w, float h, Color color) =>
         Quad(new Vector2(x, y), new Vector2(x + w, y), new Vector2(x + w, y + h), new Vector2(x, y + h), color);
 

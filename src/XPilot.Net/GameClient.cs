@@ -171,10 +171,14 @@ public sealed class GameClient : IMatchView
         var setup = new MatchSetup
         {
             Map = map,
+            Mode = msg.Mode,
             IncludePlayer = false,
             BotCount = 0,
             ScoreLimit = msg.ScoreLimit,
             CaptureLimit = msg.CaptureLimit,
+            TeamScoreLimit = msg.TeamScoreLimit,
+            Lives = msg.Lives,
+            HillScoreLimit = msg.HillScoreLimit,
             TimeLimit = msg.TimeLimit,
             Laps = msg.Laps,
         };
@@ -240,6 +244,7 @@ public sealed class GameClient : IMatchView
         while (_snapshots.Count > 2 && _snapshots[1].Tick < oldest) _snapshots.RemoveAt(0);
 
         _world.Rules.ReadState(new BinaryReader(new MemoryStream(snap.RulesState)));
+        _world.Chaos.ReadState(new BinaryReader(new MemoryStream(snap.ChaosState)));
         Reconcile(snap);
     }
 

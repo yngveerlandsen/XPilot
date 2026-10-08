@@ -8,6 +8,8 @@ namespace XPilot.Core;
 public sealed class MatchSetup
 {
     public required Map Map { get; init; }
+    /// <summary>The mode to play; null plays the map's own. Ignored if the map can't be played that way.</summary>
+    public GameModeKind? Mode { get; init; }
     /// <summary>Bots wanted. Humans who join take over bot seats when the map is full.</summary>
     public int BotCount { get; init; } = 3;
     public BotDifficulty Difficulty { get; init; } = BotDifficulty.Normal;
@@ -19,12 +21,21 @@ public sealed class MatchSetup
     public int ScoreLimit { get; init; } = 10;
     /// <summary>Ball mode captures needed to win.</summary>
     public int CaptureLimit { get; init; } = 3;
-    /// <summary>Seconds (0 = unlimited). Defaults to 5 minutes for dogfight, 10 for ball mode.</summary>
+    /// <summary>Team dogfight: kills a team needs to win.</summary>
+    public int TeamScoreLimit { get; init; } = 20;
+    /// <summary>Last pilot standing: lives each pilot starts with.</summary>
+    public int Lives { get; init; } = 3;
+    /// <summary>King of the hill: seconds on the hill needed to win.</summary>
+    public int HillScoreLimit { get; init; } = 60;
+    /// <summary>Seconds (0 = unlimited). Defaults to 5 minutes for dogfight, 10 for ball mode and last pilot standing.</summary>
     public float? TimeLimit { get; init; }
     public int? Laps { get; init; }
     public GameConfig? Config { get; init; }
     /// <summary>Most ships allowed. Defaults to one per base; more than that share bases.</summary>
     public int? Capacity { get; init; }
+
+    /// <summary>The mode this setup plays: <see cref="Mode"/> if the map supports it, otherwise the map's own.</summary>
+    public GameModeKind EffectiveMode => Mode is { } mode && GameModes.Supports(mode, Map) ? mode : Map.Mode;
 }
 
 /// <summary>What the renderer and HUD draw: a world, and the ship the local player flies (if any).</summary>
@@ -79,20 +90,23 @@ public sealed class Match : IMatchView
     public IReadOnlyList<Ship> Humans => _humans;
     /// <summary>Most ships the match holds: one per base unless the setup says otherwise.</summary>
     public int Capacity => Setup.Capacity ?? World.Map.Bases.Count;
-    private bool IsTeamMode => World.Map.Mode == GameModeKind.Ball;
+    private bool IsTeamMode => World.Rules.IsTeamGame;
 
     /// <summary>The settings a match with this setup runs on.</summary>
     public static GameConfig CreateConfig(MatchSetup setup)
     {
         var config = (setup.Config ?? new GameConfig()).Clone();
-        if (setup.Map.Mode == GameModeKind.Race) config.ShipCollisionsKill = false;
+        if (setup.EffectiveMode == GameModeKind.Race) config.ShipCollisionsKill = false;
         return config;
     }
 
-    public static IGameRules CreateRules(MatchSetup setup) => setup.Map.Mode switch
+    public static IGameRules CreateRules(MatchSetup setup) => setup.EffectiveMode switch
     {
         GameModeKind.Race => new RaceRules(setup.Laps ?? setup.Map.Laps, RaceRules.ZoneRadius(setup.Difficulty)),
         GameModeKind.Ball => new BallRules(setup.CaptureLimit, setup.TimeLimit ?? 600f),
+        GameModeKind.TeamDogfight => new TeamDogfightRules(setup.TeamScoreLimit, setup.TimeLimit ?? 300f),
+        GameModeKind.Elimination => new EliminationRules(setup.Lives, setup.TimeLimit ?? 600f),
+        GameModeKind.KingOfTheHill => new KingOfTheHillRules(setup.HillScoreLimit, setup.TimeLimit ?? 300f),
         _ => new DogfightRules(setup.ScoreLimit, setup.TimeLimit ?? 300f),
     };
 
@@ -141,10 +155,21 @@ public sealed class Match : IMatchView
     {
         var ships = World.Ships;
         if (_inputs.Length < ships.Count) _inputs = new ShipInput[Math.Max(ships.Count, _inputs.Length * 2)];
+        // Bots see reversed controls coming and steer the other way, except the easy ones.
+        bool reversed = World.Chaos.Has(ChaosKind.ReversedControls);
         for (int i = 0; i < ships.Count; i++)
         {
             int id = ships[i].Id;
-            _inputs[i] = _botsByShip.TryGetValue(id, out var bot) ? bot.Update() : _humanInputs.GetValueOrDefault(id);
+            if (_botsByShip.TryGetValue(id, out var bot))
+            {
+                var input = bot.Update();
+                if (reversed && bot.Difficulty != BotDifficulty.Easy) input.Turn = -input.Turn;
+                _inputs[i] = input;
+            }
+            else
+            {
+                _inputs[i] = _humanInputs.GetValueOrDefault(id);
+            }
         }
         World.Step(_inputs.AsSpan(0, ships.Count));
     }

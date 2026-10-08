@@ -43,6 +43,8 @@ public sealed class WorldRenderer
         pb.Begin(cam.View, PrimitiveBatch.Additive);
         foreach (var offset in _wrapOffsets) DrawWallEdges(pb, offset, view);
         DrawMapObjects(pb, match, ToView, view, time);
+        DrawHill(pb, match, ToView, time);
+        DrawBlackHole(pb, world, ToView, time);
         particles.Draw(pb, p => ToView(p.ToNum()), view);
 
         foreach (var b in world.Bullets)
@@ -72,6 +74,76 @@ public sealed class WorldRenderer
             DrawArrow(pb, ToView(Interpolate(player.PrevPosition, player.Position, alpha)), player, target, arrowColor, hideWithin);
         }
         pb.End();
+
+        if (world.Chaos.Has(ChaosKind.Blackout))
+        {
+            var center = match.Player is { Alive: true } me ? ToView(Interpolate(me.PrevPosition, me.Position, alpha)) : cam.Position;
+            DrawBlackout(pb, cam, center, view);
+        }
+    }
+
+    /// <summary>Darkness everywhere but a small pool of light around the ship.</summary>
+    private static void DrawBlackout(PrimitiveBatch pb, Camera cam, Vector2 center, RectangleF view)
+    {
+        const float clear = 140f, dark = 380f, darkness = 0.97f;
+        float farthest = 0f;
+        foreach (var corner in new[] { new Vector2(view.X, view.Y), new Vector2(view.Right, view.Y), new Vector2(view.X, view.Bottom), new Vector2(view.Right, view.Bottom) })
+        {
+            farthest = MathF.Max(farthest, Vector2.Distance(center, corner));
+        }
+
+        pb.Begin(cam.View, BlendState.AlphaBlend);
+        // A few rings approximate a smooth fall-off.
+        const int steps = 6;
+        for (int i = 0; i < steps; i++)
+        {
+            float t0 = i / (float)steps, t1 = (i + 1) / (float)steps;
+            pb.Ring(center, clear + (dark - clear) * t0, clear + (dark - clear) * t1,
+                Color.Black * (darkness * Smooth(t0)), Color.Black * (darkness * Smooth(t1)), 72);
+        }
+        pb.Ring(center, dark, MathF.Max(dark + 10f, farthest + 20f), Color.Black * darkness, Color.Black * darkness, 72);
+        pb.End();
+
+        static float Smooth(float t) => t * t * (3f - 2f * t);
+    }
+
+    /// <summary>King of the hill: the zone, in the colour of whoever holds it.</summary>
+    private void DrawHill(PrimitiveBatch pb, IMatchView match, Func<System.Numerics.Vector2, Vector2> toView, float time)
+    {
+        if (match.World.Rules is not KingOfTheHillRules hill) return;
+        var p = toView(hill.Hill);
+        var holder = match.World.GetShip(hill.Holder);
+        var color = hill.Holder switch
+        {
+            KingOfTheHillRules.Contested => ((int)(time * 6f) & 1) == 0 ? Palette.Warning : Palette.Hill,
+            _ when holder == null => Palette.Hill * 0.5f,
+            _ => Palette.Ship(holder),
+        };
+        float r = KingOfTheHillRules.HillRadius;
+        pb.FilledCircle(p, r, color * 0.05f, 48);
+        pb.Circle(p, r, 2f, color * (0.7f + 0.3f * MathF.Sin(time * 3f)), 64, glow: 0.8f, dashed: true, rotation: time * 0.4f);
+        pb.Circle(p, r * 0.15f, 1.5f, color * 0.6f, 16);
+        // A crown, so the hill reads at a glance.
+        var crown = new[] { new Vector2(-14, 6), new Vector2(-14, -6), new Vector2(-7, 0), new Vector2(0, -9), new Vector2(7, 0), new Vector2(14, -6), new Vector2(14, 6) };
+        for (int i = 0; i < crown.Length; i++) crown[i] += p;
+        pb.Polyline(crown, true, 2f, color, 0.8f);
+    }
+
+    /// <summary>The black hole event: rings spiralling into a point.</summary>
+    private static void DrawBlackHole(PrimitiveBatch pb, World world, Func<System.Numerics.Vector2, Vector2> toView, float time)
+    {
+        if (world.Chaos.Get(ChaosKind.BlackHole) is not { } hole) return;
+        var p = toView(hole.Point);
+        float fade = Math.Clamp(MathF.Min(hole.Remaining, hole.Duration - hole.Remaining) * 2f, 0f, 1f);
+        for (int i = 0; i < 5; i++)
+        {
+            // Each ring shrinks towards the centre and starts again from the outside.
+            float phase = (time * 0.5f + i / 5f) % 1f;
+            float radius = 30f + (1f - phase) * 190f;
+            pb.Circle(p, radius, 1.5f, Palette.Chaos * (phase * 0.6f * fade), 48, dashed: true, rotation: time * (1.5f + i * 0.3f));
+        }
+        pb.Circle(p, World.BlackHoleKillRadius, 3f, Palette.Chaos * fade, 24, glow: 1.5f);
+        pb.Circle(p, World.BlackHoleKillRadius * 0.5f, 2f, Color.White * (0.6f * fade), 16);
     }
 
     /// <summary>Where the player should be heading: the next checkpoint, or the relevant ball or treasure.</summary>
@@ -84,6 +156,7 @@ public sealed class WorldRenderer
             float zone = world.Rules is RaceRules race ? race.CheckpointRadius : 0f;
             return (_map.Checkpoints[player.NextCheckpoint], Palette.Checkpoint * 0.8f, zone + 60f);
         }
+        if (world.Rules is KingOfTheHillRules hill) return (hill.Hill, Palette.Hill * 0.8f, KingOfTheHillRules.HillRadius * 0.8f);
         if (world.Rules.Mode != GameModeKind.Ball || _map.TreasureOf(player.Team) is not { } home) return null;
 
         if (world.CarriedBy(player) != null) return (home, Palette.Team(player.Team), 80f);
@@ -175,7 +248,7 @@ public sealed class WorldRenderer
             pb.GlowLine(p + new Vector2(-13, 15), p + new Vector2(13, 15), 2f, color, 0.6f);
         }
 
-        foreach (var t in _map.Treasures)
+        foreach (var t in world.Rules.Mode == GameModeKind.Ball ? _map.Treasures : [])
         {
             var p = toView(t.Position);
             if (!view.Contains(p, 60f)) continue;

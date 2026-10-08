@@ -1,35 +1,49 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using XPilot.Core;
 using XPilot.Core.AI;
+using XPilot.Core.Simulation;
 using XPilot.Desktop.Graphics;
 using XPilot.Desktop.Input;
 using XPilot.Net;
 
 namespace XPilot.Desktop.Screens;
 
+/// <summary>The pages of the settings menu.</summary>
+public enum SettingsPage { Game, Match, Physics, Events, Video, Audio, Controls, Network }
+
 /// <summary>
 /// Tabbed settings pages. Every change is saved and applied at once. Runs as its own screen from the main
 /// menu, and as an overlay in the pause menu so a game in progress keeps going.
 /// </summary>
-public sealed class SettingsMenu(XPilotGame game, bool inGame)
+public sealed class SettingsMenu(XPilotGame game, bool inGame, SettingsPage page = SettingsPage.Game)
 {
-    private enum Tab { Game, Video, Audio, Controls, Network }
-
     /// <param name="Change">Left/right (-1/+1), or Enter (+1) when there is no <paramref name="Activate"/>.</param>
-    private sealed record Item(string Label, Func<string> Value, Action<int>? Change = null, Action? Activate = null);
+    /// <param name="Note">A line explaining the row, shown while it is selected.</param>
+    private sealed record Item(string Label, Func<string> Value, Action<int>? Change = null, Action? Activate = null, string? Note = null);
 
-    private static readonly Tab[] Tabs = Enum.GetValues<Tab>();
+    private static readonly SettingsPage[] Tabs = Enum.GetValues<SettingsPage>();
     private static readonly int[] ScoreLimits = [5, 10, 15, 20, 25, 30, 0];
+    private static readonly int[] TeamScoreLimits = [10, 15, 20, 30, 50, 0];
     private static readonly int[] CaptureLimits = [1, 2, 3, 4, 5, 7, 10, 0];
+    private static readonly int[] LivesCounts = [1, 2, 3, 4, 5, 7, 10];
+    private static readonly int[] HillScoreLimits = [30, 45, 60, 90, 120, 180, 0];
     private static readonly int[] TimeLimits = [-1, 2, 3, 5, 10, 15, 20, 30, 0];
     private static readonly int[] LapCounts = [0, 1, 2, 3, 4, 5, 7, 10];
+    private static readonly int[] GravityLevels = [0, 25, 50, 75, 100, 150, 200, 300];
+    private static readonly int[] PowerLevels = [50, 75, 100, 125, 150, 200];
+    private static readonly int[] FuelLevels = [0, 25, 50, 100, 150, 200, 300];
+    private static readonly int[] FireRates = [50, 75, 100, 150, 200, 300];
+    private static readonly int[] EventLengths = [5, 10, 15, 20, 30];
     private static readonly float[] ShakeLevels = [0f, 0.5f, 1f];
     private static readonly string[] ParticleLevels = ["Low", "Normal", "High"];
 
-    private int _tab;
+    private int _tab = Array.IndexOf(Tabs, page);
     /// <summary>-1 is the tab bar, otherwise a row on the current tab.</summary>
     private int _row = -1;
+    /// <summary>The first row shown, when a page has more rows than fit.</summary>
+    private int _scroll;
     /// <summary>A text field being typed into, with what to do with the result.</summary>
     private (string Text, int Max, Action<string> Commit)? _editing;
     private GameAction? _capturing;
@@ -38,23 +52,54 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
     public bool IsOpen { get; private set; } = true;
 
     private Settings S => game.Settings;
+    private RuleOptions R => game.Settings.Rules;
     private InputState Input => game.Input;
 
     private List<Item> Items() => Tabs[_tab] switch
     {
-        Tab.Game =>
+        SettingsPage.Game =>
         [
             new("NAME", () => S.PlayerName, Activate: () => Edit(S.PlayerName, Protocol.MaxNameLength, t => S.PlayerName = Protocol.CleanName(t))),
             new("SKILL", () => S.Difficulty.ToUpperInvariant(),
                 d => S.Difficulty = Cycle(Enum.GetNames<BotDifficulty>(), S.Difficulty, d)),
+            new("SHIP NAMES", () => OnOff(S.ShowShipNames), _ => S.ShowShipNames = !S.ShowShipNames),
+        ],
+        SettingsPage.Match =>
+        [
             new("DOGFIGHT KILLS TO WIN", () => Limit(S.ScoreLimit), d => S.ScoreLimit = Cycle(ScoreLimits, S.ScoreLimit, d)),
+            new("TEAM KILLS TO WIN", () => Limit(S.TeamScoreLimit), d => S.TeamScoreLimit = Cycle(TeamScoreLimits, S.TeamScoreLimit, d),
+                Note: "TEAM DOGFIGHT: KILLS A TEAM NEEDS"),
             new("BALL CAPTURES TO WIN", () => Limit(S.CaptureLimit), d => S.CaptureLimit = Cycle(CaptureLimits, S.CaptureLimit, d)),
+            new("LIVES", () => S.Lives.ToString(), d => S.Lives = Cycle(LivesCounts, S.Lives, d),
+                Note: "LAST PILOT STANDING: LOSE THEM ALL AND YOU ARE OUT"),
+            new("HILL SECONDS TO WIN", () => Limit(S.HillScoreLimit), d => S.HillScoreLimit = Cycle(HillScoreLimits, S.HillScoreLimit, d),
+                Note: "KING OF THE HILL: SECONDS ALONE ON THE HILL TO WIN"),
             new("TIME LIMIT", () => S.TimeLimitMinutes switch { < 0 => "MODE DEFAULT", 0 => "NONE", var m => $"{m} MIN" },
                 d => S.TimeLimitMinutes = Cycle(TimeLimits, S.TimeLimitMinutes, d)),
             new("RACE LAPS", () => S.Laps == 0 ? "MAP DEFAULT" : S.Laps.ToString(), d => S.Laps = Cycle(LapCounts, S.Laps, d)),
-            new("SHIP NAMES", () => OnOff(S.ShowShipNames), _ => S.ShowShipNames = !S.ShowShipNames),
         ],
-        Tab.Video =>
+        SettingsPage.Physics =>
+        [
+            new("GRAVITY", () => R.GravityPercent == 0 ? "OFF" : Percent(R.GravityPercent), d => R.GravityPercent = Cycle(GravityLevels, R.GravityPercent, d),
+                Note: "MAP GRAVITY AND ATTRACTORS"),
+            new("ENGINE POWER", () => Percent(R.ThrustPercent), d => R.ThrustPercent = Cycle(PowerLevels, R.ThrustPercent, d)),
+            new("TOP SPEED", () => Percent(R.SpeedPercent), d => R.SpeedPercent = Cycle(PowerLevels, R.SpeedPercent, d)),
+            new("FUEL USE", () => R.FuelUsagePercent == 0 ? "NONE - UNLIMITED FUEL" : Percent(R.FuelUsagePercent),
+                d => R.FuelUsagePercent = Cycle(FuelLevels, R.FuelUsagePercent, d), Note: "FUEL BURNED BY THRUST, SHIELD AND GUNS"),
+            new("BULLET SPEED", () => Percent(R.BulletSpeedPercent), d => R.BulletSpeedPercent = Cycle(PowerLevels, R.BulletSpeedPercent, d)),
+            new("FIRE RATE", () => Percent(R.FireRatePercent), d => R.FireRatePercent = Cycle(FireRates, R.FireRatePercent, d)),
+            new("WALL CRASHES", () => R.Walls.ToString().ToUpperInvariant(), d => R.Walls = Cycle(Enum.GetValues<WallDamage>(), R.Walls, d),
+                Note: "FORGIVING TAKES TWICE THE SPEED TO CRASH - OFF NEVER CRASHES"),
+            new("RAMMING", () => R.ShipCollisions ? "DEADLY" : "BOUNCE", _ => R.ShipCollisions = !R.ShipCollisions,
+                Note: "SHIPS COLLIDING HARD BOTH EXPLODE, OR BOUNCE OFF"),
+            new("RESET TO NORMAL", () => R.IsStandardPhysics ? "(NOTHING CHANGED)" : "", Activate: () =>
+            {
+                R.ResetPhysics();
+                _message = "NORMAL PHYSICS RESTORED";
+            }),
+        ],
+        SettingsPage.Events => EventItems(),
+        SettingsPage.Video =>
         [
             new("FULLSCREEN", () => OnOff(S.Fullscreen), _ =>
             {
@@ -76,7 +121,7 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
             new("PARTICLES", () => S.Particles.ToUpperInvariant(), d => S.Particles = Cycle(ParticleLevels, S.Particles, d)),
             new("SHOW FPS", () => OnOff(S.ShowFps), _ => S.ShowFps = !S.ShowFps),
         ],
-        Tab.Audio =>
+        SettingsPage.Audio =>
         [
             new("SOUND EFFECTS", () => VolumeBar(S.Volume), d =>
             {
@@ -94,7 +139,7 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
                 }),
             new("MUTE IN BACKGROUND", () => OnOff(S.MuteInBackground), _ => S.MuteInBackground = !S.MuteInBackground),
         ],
-        Tab.Controls => ControlItems(),
+        SettingsPage.Controls => ControlItems(),
         _ =>
         [
             new("HOST PORT", () => S.HostPort.ToString(), Activate: () => Edit(S.HostPort.ToString(), 5, t =>
@@ -110,6 +155,23 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
             new("RESET HOST PORT", () => "", Activate: () => S.HostPort = Protocol.DefaultPort),
         ],
     };
+
+    private List<Item> EventItems()
+    {
+        var items = new List<Item>
+        {
+            new("HOW OFTEN", () => R.Events.ToString().ToUpperInvariant(), d => R.Events = Cycle(Enum.GetValues<EventFrequency>(), R.Events, d),
+                Note: "RANDOM EVENTS SHAKE THINGS UP FOR A FEW SECONDS - CHAOS RUNS TWO AT ONCE"),
+            new("HOW LONG", () => $"{R.EventSeconds} SEC", d => R.EventSeconds = Cycle(EventLengths, R.EventSeconds, d)),
+        };
+        foreach (var kind in ChaosDirector.AllKinds)
+        {
+            items.Add(new(ChaosDirector.Name(kind).ToUpperInvariant(), () => OnOff(R.IsEventEnabled(kind)),
+                _ => R.SetEventEnabled(kind, !R.IsEventEnabled(kind)),
+                Note: ChaosDirector.Description(kind).ToUpperInvariant() + (ChaosDirector.NeedsWeapons(kind) ? " - NOT IN RACES" : "")));
+        }
+        return items;
+    }
 
     private List<Item> ControlItems()
     {
@@ -192,6 +254,14 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
             return;
         }
 
+        int pageDelta = Input.MenuPagePrevious ? -1 : Input.MenuPageNext ? 1 : 0;
+        if (pageDelta != 0)
+        {
+            SwitchTab(pageDelta);
+            if (_row >= 0) _row = 0;
+            return;
+        }
+
         var items = Items();
         if (Input.MenuUp) Move(-1, items.Count);
         if (Input.MenuDown) Move(1, items.Count);
@@ -235,6 +305,7 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
     private void SwitchTab(int delta)
     {
         _tab = (_tab + delta + Tabs.Length) % Tabs.Length;
+        _scroll = 0;
         _message = null;
         game.Sounds.Play("select", 0.6f);
     }
@@ -258,8 +329,9 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
         pb.Begin(Matrix.Identity, PrimitiveBatch.Additive);
         VectorFont.Draw(pb, "SETTINGS", new Vector2(cx, 50 * s), 40f * s, Palette.Accent, TextAlign.Center, 3f * s);
 
-        // Tab bar
-        float tabY = 125 * s, spacing = 170 * s;
+        // Tab bar, squeezed to fit narrow windows.
+        float tabY = 125 * s, spacing = MathF.Min(150 * s, (vp.Width - 200 * s) / (Tabs.Length - 1));
+        float tabSize = MathF.Min(15f * s, spacing * 0.9f / (VectorFont.Measure("CONTROLS", 15f) / 15f));
         float tabX = cx - spacing * (Tabs.Length - 1) / 2f;
         for (int i = 0; i < Tabs.Length; i++)
         {
@@ -267,23 +339,30 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
             var name = Tabs[i].ToString().ToUpperInvariant();
             var color = current ? (_row < 0 ? Pulse(Palette.Text, time) : Palette.Accent) : Palette.TextDim * 0.7f;
             var pos = new Vector2(tabX + i * spacing, tabY);
-            VectorFont.Draw(pb, name, pos, 15f * s, color, TextAlign.Center);
+            VectorFont.Draw(pb, name, pos, tabSize, color, TextAlign.Center);
             if (current)
             {
-                float w = VectorFont.Measure(name, 15f * s);
+                float w = VectorFont.Measure(name, tabSize);
                 pb.Line(new Vector2(pos.X - w / 2f, tabY + 24 * s), new Vector2(pos.X + w / 2f, tabY + 24 * s), 2f * s, color);
             }
         }
-        if (_row < 0)
-        {
-            VectorFont.Draw(pb, "<", new Vector2(tabX - 90 * s, tabY), 15f * s, Palette.TextDim, TextAlign.Center);
-            VectorFont.Draw(pb, ">", new Vector2(tabX + (Tabs.Length - 1) * spacing + 90 * s, tabY), 15f * s, Palette.TextDim, TextAlign.Center);
-        }
+        VectorFont.Draw(pb, "LB", new Vector2(tabX - spacing * 0.75f, tabY + 2 * s), 10f * s, Palette.TextDim * 0.7f, TextAlign.Center);
+        VectorFont.Draw(pb, "RB", new Vector2(tabX + (Tabs.Length - 1) * spacing + spacing * 0.75f, tabY + 2 * s), 10f * s, Palette.TextDim * 0.7f, TextAlign.Center);
 
-        // Rows
+        // Rows, scrolled to keep the selected one in view.
         var items = Items();
+        const float rowHeight = 36f;
+        int visible = Math.Max(3, (int)((vp.Height / s - 190f - 150f) / rowHeight));
+        if (_row >= 0)
+        {
+            if (_row < _scroll) _scroll = _row;
+            if (_row >= _scroll + visible) _scroll = _row - visible + 1;
+        }
+        _scroll = Math.Clamp(_scroll, 0, Math.Max(0, items.Count - visible));
+        if (_scroll > 0) VectorFont.Draw(pb, "- MORE ABOVE -", new Vector2(cx, 166 * s), 9f * s, Palette.TextDim * 0.6f, TextAlign.Center);
+
         float y = 190 * s;
-        for (int i = 0; i < items.Count; i++)
+        for (int i = _scroll; i < Math.Min(items.Count, _scroll + visible); i++)
         {
             var item = items[i];
             bool selected = i == _row;
@@ -302,13 +381,28 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
                 var valueColor = selected && (_editing != null || _capturing != null) ? Palette.Accent : color;
                 VectorFont.Draw(pb, value, new Vector2(cx + 24 * s, y), 15f * s, valueColor);
             }
-            y += 36 * s;
+            y += rowHeight * s;
+        }
+        if (_scroll + visible < items.Count)
+        {
+            VectorFont.Draw(pb, "- MORE BELOW -", new Vector2(cx, y - 8 * s), 9f * s, Palette.TextDim * 0.6f, TextAlign.Center);
+            y += 12 * s;
         }
 
-        if (Tabs[_tab] == Tab.Game) Note(pb, cx, y + 10 * s, s, "SKILL SETS BOTS AND RACE CHECKPOINT SIZE - MATCH RULES APPLY TO GAMES YOU PLAY OR HOST" + (inGame ? ", FROM THE NEXT ONE" : ""));
-        if (Tabs[_tab] == Tab.Audio) Note(pb, cx, y + 10 * s, s, "ENTER ON NOW PLAYING SKIPS TO ANOTHER TRACK - ADD .OGG FILES TO THE MUSIC FOLDER");
-        if (Tabs[_tab] == Tab.Controls) Note(pb, cx, y + 10 * s, s, "GAMEPAD: STICK TURNS, A/RT THRUST, X/RB FIRE, B/LT SHIELD, Y GRAB");
-        if (Tabs[_tab] == Tab.Network) Note(pb, cx, y + 10 * s, s, "CLEAR THE MASTER SERVER FOR LAN ONLY - LISTING HOSTED GAMES SHOWS YOUR ADDRESS");
+        string later = inGame ? " - FROM THE NEXT MATCH" : "";
+        string? note = _row >= 0 && _row < items.Count ? items[_row].Note : null;
+        note ??= Tabs[_tab] switch
+        {
+            SettingsPage.Game => "SKILL SETS BOTS AND RACE CHECKPOINT SIZE",
+            SettingsPage.Match => "MATCH RULES APPLY TO GAMES YOU PLAY OR HOST" + later,
+            SettingsPage.Physics => "PHYSICS APPLY TO GAMES YOU PLAY OR HOST" + later,
+            SettingsPage.Events => "EVENTS APPLY TO GAMES YOU PLAY OR HOST" + later,
+            SettingsPage.Audio => "ENTER ON NOW PLAYING SKIPS TO ANOTHER TRACK - ADD .OGG FILES TO THE MUSIC FOLDER",
+            SettingsPage.Controls => "GAMEPAD: STICK TURNS, A/RT THRUST, X/RB FIRE, B/LT SHIELD, Y GRAB",
+            SettingsPage.Network => "CLEAR THE MASTER SERVER FOR LAN ONLY - LISTING HOSTED GAMES SHOWS YOUR ADDRESS",
+            _ => null,
+        };
+        if (note != null) Note(pb, cx, y + 10 * s, s, note);
 
         if (_message != null)
         {
@@ -316,8 +410,8 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
         }
         string hint = _capturing != null ? "PRESS A KEY   ESC CANCEL"
             : _editing != null ? "TYPE   ENTER OK   ESC CANCEL"
-            : _row < 0 ? "LEFT/RIGHT CHOOSE A PAGE   DOWN OR ENTER TO EDIT   ESC BACK"
-            : "UP/DOWN CHOOSE   LEFT/RIGHT CHANGE   ENTER EDIT   ESC BACK";
+            : _row < 0 ? "LEFT/RIGHT OR LB/RB CHOOSE A PAGE   DOWN OR ENTER TO EDIT   ESC BACK"
+            : "UP/DOWN CHOOSE   LEFT/RIGHT CHANGE   LB/RB OR PGUP/PGDN PAGE   ESC BACK";
         VectorFont.Draw(pb, hint, new Vector2(cx, vp.Height - 50 * s), 10f * s, Palette.TextDim * 0.7f, TextAlign.Center);
         pb.End();
     }
@@ -330,6 +424,8 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
     private static string OnOff(bool value) => value ? "ON" : "OFF";
 
     private static string Limit(int value) => value == 0 ? "NO LIMIT" : value.ToString();
+
+    private static string Percent(int value) => value == 100 ? "NORMAL" : $"{value}%";
 
     private static string VolumeBar(float volume)
     {
@@ -354,9 +450,9 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame)
 }
 
 /// <summary>The settings menu on its own, from the main menu.</summary>
-public sealed class SettingsScreen(XPilotGame game) : Screen(game)
+public sealed class SettingsScreen(XPilotGame game, SettingsPage page = SettingsPage.Game) : Screen(game)
 {
-    private readonly SettingsMenu _menu = new(game, inGame: false);
+    private readonly SettingsMenu _menu = new(game, inGame: false, page);
     private float _time;
 
     public override void Update(float dt)

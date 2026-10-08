@@ -31,6 +31,7 @@ public sealed class PlayScreen : Screen
     private float _overTimer;
     private float _shake;
     private float _thrustSpawn;
+    private float _windSpawn;
     private Vector2 _starCamera;
     private bool _paused;
     private int _pauseIndex;
@@ -58,7 +59,7 @@ public sealed class PlayScreen : Screen
 
     private PauseItem[] PauseItems => _net == null
         ? [PauseItem.Resume, PauseItem.Restart, PauseItem.Settings, PauseItem.MainMenu]
-        : World.Map.Mode == GameModeKind.Ball && _session.Player != null
+        : World.Rules.IsTeamGame && _session.Player != null
             ? [PauseItem.Resume, PauseItem.SwitchTeam, PauseItem.Settings, PauseItem.Leave]
             : [PauseItem.Resume, PauseItem.Settings, PauseItem.Leave];
 
@@ -91,19 +92,28 @@ public sealed class PlayScreen : Screen
         _camera.Position = focus.ToXna();
         _starCamera = _camera.Position;
 
+        string mode = GameModes.Name(World.Rules.Mode).ToUpperInvariant();
         if (_net != null)
         {
             _hud.ShowCenter(Map.Name.ToUpperInvariant(), Palette.Accent, 3f,
-                _session.Player == null ? "SPECTATING - SERVER FULL" : $"ON {_net.Client.ServerName.ToUpperInvariant()}");
+                _session.Player == null ? "SPECTATING - SERVER FULL" : $"{mode} ON {_net.Client.ServerName.ToUpperInvariant()}");
         }
-        if (World.Rules is DogfightRules dogfight && _net == null)
+        switch (World.Rules)
         {
-            _hud.ShowCenter("DOGFIGHT", Palette.Accent, 2.5f, dogfight.ScoreLimit > 0 ? $"FIRST TO {dogfight.ScoreLimit} KILLS WINS" : "NO KILL LIMIT");
-        }
-        else if (World.Rules is BallRules ball && _session.Player is { } player)
-        {
-            _hud.ShowCenter($"{Teams.Name(player.Team).ToUpperInvariant()} TEAM", Palette.Team(player.Team), 3.5f,
-                $"{_bindings.Describe(GameAction.Grab)} GRABS THE ENEMY BALL" + (ball.CaptureLimit > 0 ? $" - FIRST TO {ball.CaptureLimit}" : ""));
+            case DogfightRules dogfight when _net == null:
+                _hud.ShowCenter(mode, Palette.Accent, 2.5f, dogfight.ScoreLimit > 0 ? $"FIRST TO {dogfight.ScoreLimit} KILLS WINS" : "NO KILL LIMIT");
+                break;
+            case ITeamRules team when _session.Player is { } player:
+                string goal = team.TeamScoreLimit > 0 ? $" - FIRST TO {team.TeamScoreLimit}" : "";
+                _hud.ShowCenter($"{Teams.Name(player.Team).ToUpperInvariant()} TEAM", Palette.Team(player.Team), 3.5f,
+                    team is BallRules ? $"{_bindings.Describe(GameAction.Grab)} GRABS THE ENEMY BALL{goal}" : $"SHOOT DOWN THE OTHER TEAM{goal}");
+                break;
+            case EliminationRules elimination when _net == null:
+                _hud.ShowCenter(mode, Palette.Accent, 3f, $"{elimination.Lives} {(elimination.Lives == 1 ? "LIFE" : "LIVES")} EACH - BE THE LAST ONE FLYING");
+                break;
+            case KingOfTheHillRules hill when _net == null:
+                _hud.ShowCenter(mode, Palette.Hill, 3f, "HOLD THE HILL ALONE TO SCORE" + (hill.ScoreLimit > 0 ? $" - FIRST TO {hill.ScoreLimit}" : ""));
+                break;
         }
         HandleEvents(_session.TakeEvents());
     }
@@ -176,6 +186,7 @@ public sealed class PlayScreen : Screen
         hud.ChatInput = _chatInput;
 
         Effects.ThrustTrails(_particles, World, dt, ref _thrustSpawn);
+        SolarWindStreaks(dt);
         _particles.Update(dt, p => Map.WrapPosition(p.ToNum()).ToXna());
         UpdateCamera(dt);
         hud.Update(dt);
@@ -272,10 +283,30 @@ public sealed class PlayScreen : Screen
         if (_renderer != null) _renderer.ShowNames = s.ShowShipNames;
     }
 
+    /// <summary>Streaks blowing across the screen while the solar wind event runs.</summary>
+    private void SolarWindStreaks(float dt)
+    {
+        if (World.Chaos.Get(ChaosKind.SolarWind) is not { } wind) return;
+        var dir = wind.Point.ToXna();
+        _windSpawn += dt * 90f * _particles.Density;
+        var vp = Game.GraphicsDevice.Viewport;
+        float half = MathF.Max(vp.Width, vp.Height) / _camera.Zoom * 0.6f;
+        while (_windSpawn >= 1f)
+        {
+            _windSpawn -= 1f;
+            var pos = _camera.Position + new Vector2(_particles.Random(-half, half), _particles.Random(-half, half)) - dir * half * 0.5f;
+            _particles.Spawn(pos, dir * _particles.Random(500f, 800f), _particles.Random(0.4f, 0.9f), Palette.Chaos * 0.35f, 1f, 0f);
+        }
+    }
+
     private void UpdateCamera(float dt)
     {
-        // Follow the player, or the first ship flying when spectating.
+        // Follow the player, or the first ship flying when spectating or knocked out.
         var player = _session.Player ?? World.Ships.FirstOrDefault(s => s.Alive) ?? World.Ships.FirstOrDefault();
+        if (player is { Alive: false } && World.Rules.IsEliminated(player))
+        {
+            player = World.Rules.GetStandings(World).FirstOrDefault(s => s.Alive) ?? player;
+        }
         if (player is { Alive: true })
         {
             var pos = player.PrevPosition + Map.Delta(player.PrevPosition, player.Position) * _session.Alpha;
@@ -421,7 +452,44 @@ public sealed class PlayScreen : Screen
                     break;
                 }
 
-                case GameEventType.MatchOver when world.Rules is BallRules:
+                case GameEventType.ChaosWarning:
+                    Sounds.Play("beep", 0.8f, 0.4f);
+                    hud.AddFeed($"INCOMING: {ChaosDirector.Name((ChaosKind)e.Value).ToUpperInvariant()}", Palette.Chaos);
+                    break;
+
+                case GameEventType.ChaosStarted:
+                {
+                    var kind = (ChaosKind)e.Value;
+                    Sounds.Play("go", 0.8f, -0.4f);
+                    _shake = MathF.Max(_shake, 5f);
+                    hud.ShowCenter(ChaosDirector.Name(kind).ToUpperInvariant() + "!", Palette.Chaos, 2.2f, ChaosDirector.Description(kind).ToUpperInvariant());
+                    if (kind == ChaosKind.BlackHole) _particles.Burst(pos, Vector2.Zero, 80, 60f, 400f, Palette.Chaos, 0.5f, 1.4f, 2f);
+                    break;
+                }
+
+                case GameEventType.ChaosEnded:
+                    hud.AddFeed($"{ChaosDirector.Name((ChaosKind)e.Value).ToUpperInvariant()} IS OVER", Palette.TextDim);
+                    break;
+
+                case GameEventType.ShipEliminated when ship != null:
+                    int left = (int)e.Value;
+                    hud.AddFeed($"{ship.Name} IS OUT - {left} LEFT", Palette.Ship(ship));
+                    if (isPlayer) hud.ShowCenter("ELIMINATED", Palette.Warning, 3f, "OUT OF LIVES - WATCH THE REST FIGHT IT OUT");
+                    else if (player != null && !world.Rules.IsEliminated(player) && left == 2) hud.ShowCenter("FINAL TWO", Palette.Accent, 2f, "IT IS DOWN TO YOU AND ONE OTHER");
+                    break;
+
+                case GameEventType.HillMoved:
+                    Sounds.Play("checkpoint", 0.6f);
+                    hud.AddFeed("THE HILL HAS MOVED", Palette.Hill);
+                    _particles.Burst(pos, Vector2.Zero, 60, 80f, 300f, Palette.Hill, 0.4f, 1f);
+                    break;
+
+                case GameEventType.HillTaken when isPlayer:
+                    Sounds.Play("checkpoint", 0.5f, 0.3f);
+                    hud.ShowCenter("HILL TAKEN", Palette.Hill, 1.2f, "HOLD IT");
+                    break;
+
+                case GameEventType.MatchOver when world.Rules is ITeamRules:
                 {
                     int team = (int)e.Value;
                     string text = team == Teams.None ? "DRAW" : player?.Team == team ? "YOUR TEAM WINS!" : $"{Teams.Name(team).ToUpperInvariant()} TEAM WINS";
@@ -431,7 +499,7 @@ public sealed class PlayScreen : Screen
 
                 case GameEventType.MatchOver:
                     var winner = world.Rules.GetStandings(world).FirstOrDefault();
-                    if (world.Rules.Mode == GameModeKind.Dogfight && winner != null)
+                    if (world.Rules.Mode != GameModeKind.Race && winner != null)
                     {
                         hud.ShowCenter(winner == player ? "YOU WIN!" : $"{winner.Name.ToUpperInvariant()} WINS", Palette.Ship(winner), 5f, "MATCH OVER");
                     }
@@ -450,6 +518,7 @@ public sealed class PlayScreen : Screen
         DeathCause.Bullet => $"{victim.Name} SHOT THEMSELF",
         DeathCause.Collision when killer != null => $"{killer.Name} RAMMED {victim.Name}",
         DeathCause.Collision => $"{victim.Name} COLLIDED",
+        DeathCause.BlackHole => $"{victim.Name} FELL INTO THE BLACK HOLE",
         _ => $"{victim.Name} CRASHED",
     };
 

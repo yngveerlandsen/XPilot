@@ -40,9 +40,9 @@ public sealed class ResultsScreen(XPilotGame game, Match match, MatchSetup setup
         float cx = vp.Width / 2f;
         string title = world.Rules.Mode == GameModeKind.Race ? "RACE RESULTS" : "MATCH RESULTS";
         VectorFont.Draw(pb, title, new Vector2(cx, 50 * s), 32f * s, Palette.Accent, TextAlign.Center, 3f * s);
-        if (world.Rules is BallRules ball)
+        if (world.Rules is ITeamRules teams)
         {
-            int team = ball.WinningTeam;
+            int team = teams.WinningTeam;
             string headline = team == Teams.None ? "DRAW"
                 : match.Player?.Team == team ? "YOUR TEAM WINS!"
                 : $"{Teams.Name(team).ToUpperInvariant()} TEAM WINS";
@@ -53,7 +53,7 @@ public sealed class ResultsScreen(XPilotGame game, Match match, MatchSetup setup
             string headline = playerWon ? "VICTORY!" : $"{winner.Name.ToUpperInvariant()} WINS";
             VectorFont.Draw(pb, headline, new Vector2(cx, 100 * s), 18f * s, Palette.Ship(winner), TextAlign.Center);
         }
-        VectorFont.Draw(pb, $"{world.Map.Name.ToUpperInvariant()}   {setup.Difficulty.ToString().ToUpperInvariant()} BOTS",
+        VectorFont.Draw(pb, $"{GameModes.Name(world.Rules.Mode).ToUpperInvariant()}   {world.Map.Name.ToUpperInvariant()}   {setup.Difficulty.ToString().ToUpperInvariant()} BOTS",
             new Vector2(cx, 132 * s), 10f * s, Palette.TextDim, TextAlign.Center);
         VectorFont.Draw(pb, "ENTER  MAIN MENU      R  PLAY AGAIN", new Vector2(cx, vp.Height - 50 * s), 12f * s, Palette.TextDim, TextAlign.Center);
         pb.End();

@@ -121,9 +121,20 @@ public enum GameEventType
     BallCaptured,
     /// <summary>The ball of team Value went home; ShipId is the teammate who returned it, or -1 on timeout.</summary>
     BallReturned,
+    /// <summary>A random event (<see cref="ChaosKind"/> Value) starts in <see cref="ChaosDirector.WarningTime"/> seconds.</summary>
+    ChaosWarning,
+    /// <summary>The random event Value started; Position is its point (see <see cref="ChaosEvent.Point"/>).</summary>
+    ChaosStarted,
+    ChaosEnded,
+    /// <summary>ShipId lost their last life; OtherId shot them down; Value pilots are left.</summary>
+    ShipEliminated,
+    /// <summary>King of the hill: the hill moved to Position.</summary>
+    HillMoved,
+    /// <summary>King of the hill: ShipId has the hill to themselves.</summary>
+    HillTaken,
 }
 
-public enum DeathCause { None, Bullet, Wall, Collision }
+public enum DeathCause { None, Bullet, Wall, Collision, BlackHole }
 
 /// <summary>Something that happened during a tick, for the UI, sound and kill feed.</summary>
 public readonly record struct GameEvent(
