@@ -109,10 +109,10 @@ public sealed class InputBindings
             if (MathF.Abs(stick) > 0.25f) turn += stick;
             if (pad.IsButtonDown(Buttons.DPadLeft)) turn -= 1f;
             if (pad.IsButtonDown(Buttons.DPadRight)) turn += 1f;
-            thrust |= pad.Triggers.Right > 0.3f || pad.IsButtonDown(Buttons.A);
-            fire |= pad.IsButtonDown(Buttons.RightShoulder) || pad.IsButtonDown(Buttons.X);
-            shield |= pad.Triggers.Left > 0.3f || pad.IsButtonDown(Buttons.LeftShoulder) || pad.IsButtonDown(Buttons.B);
-            grab |= pad.IsButtonDown(Buttons.Y);
+            thrust |= pad.Triggers.Left > 0.3f;
+            fire |= pad.Triggers.Right > 0.3f;
+            shield |= pad.IsButtonDown(Buttons.A);
+            grab |= pad.IsButtonDown(Buttons.B);
         }
 
         return new ShipInput { Turn = Math.Clamp(turn, -1f, 1f), Thrust = thrust, Fire = fire, Shield = shield, Grab = grab };
