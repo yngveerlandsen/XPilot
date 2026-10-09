@@ -398,7 +398,7 @@ public sealed class SettingsMenu(XPilotGame game, bool inGame, SettingsPage page
             SettingsPage.Physics => "PHYSICS APPLY TO GAMES YOU PLAY OR HOST" + later,
             SettingsPage.Events => "EVENTS APPLY TO GAMES YOU PLAY OR HOST" + later,
             SettingsPage.Audio => "ENTER ON NOW PLAYING SKIPS TO ANOTHER TRACK - ADD .OGG FILES TO THE MUSIC FOLDER",
-            SettingsPage.Controls => "GAMEPAD: STICK TURNS, A/RT THRUST, X/RB FIRE, B/LT SHIELD, Y GRAB",
+            SettingsPage.Controls => "GAMEPAD: STICK TURNS, LT THRUST, RT FIRE, A SHIELD, B GRAB",
             SettingsPage.Network => "CLEAR THE MASTER SERVER FOR LAN ONLY - LISTING HOSTED GAMES SHOWS YOUR ADDRESS",
             _ => null,
         };

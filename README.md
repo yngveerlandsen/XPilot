@@ -50,10 +50,10 @@ or `XPilot --connect host[:port] [--name Ace]` to join a server.
 | Action | Modern (default) | Classic (original XPilot) | Gamepad |
 |---|---|---|---|
 | Turn | Left/Right, A/D | A / S | Left stick, D-pad |
-| Thrust | Up, W | Shift | A, Right trigger |
-| Fire | Space, Ctrl | Enter | X, Right shoulder |
-| Shield | Down, S, Shift | Space | B, Left trigger/shoulder |
-| Grab / release ball | E, Right Shift | Ctrl | Y |
+| Thrust | Up, W | Shift | Left trigger |
+| Fire | Space, Ctrl | Enter | Right trigger |
+| Shield | Down, S, Shift | Space | A |
+| Grab / release ball | E, Right Shift | Ctrl | B |
 
 Tab shows scores, Esc pauses (in network games it opens a menu and the game keeps running), T chats in
 network games, F11 toggles fullscreen and F12 saves a screenshot to your
